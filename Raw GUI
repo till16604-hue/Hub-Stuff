@@ -1,0 +1,636 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Discord invite (embedded)
+local DISCORD_URL = "https://discord.gg/eDnvnQMag7"
+
+-- Remove old UI
+local old = playerGui:FindFirstChild("N0BD.HUB")
+if old then old:Destroy() end
+
+-- Theme
+local Theme = {
+	BG      = Color3.fromRGB(6, 10, 22),
+	Top     = Color3.fromRGB(10, 18, 38),
+	Panel   = Color3.fromRGB(11, 22, 48),
+	Card    = Color3.fromRGB(12, 26, 58),
+	Stroke  = Color3.fromRGB(40, 110, 255),
+	Text    = Color3.fromRGB(225, 238, 255),
+	SubText = Color3.fromRGB(150, 175, 210),
+	Accent  = Color3.fromRGB(0, 230, 255),
+	Danger  = Color3.fromRGB(255, 80, 110),
+}
+
+-- Sizes / radii
+local R = 22
+local TOP_H = 56
+
+local FULL_SIZE = Vector2.new(680, 400)
+local MINI_SIZE = Vector2.new(124, 50) -- smaller mini window
+
+-- Helpers
+local function tween(obj, t, props)
+	local tw = TweenService:Create(obj, TweenInfo.new(t, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), props)
+	tw:Play()
+	return tw
+end
+
+local function corner(parent, px)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, px)
+	c.Parent = parent
+	return c
+end
+
+local function stroke(parent, color, transparency, thickness)
+	local s = Instance.new("UIStroke")
+	s.Color = color
+	s.Thickness = thickness or 1
+	s.Transparency = transparency or 0.8
+	s.Parent = parent
+	return s
+end
+
+local function getViewport()
+	local cam = workspace.CurrentCamera
+	if cam then return cam.ViewportSize end
+	return Vector2.new(1920, 1080)
+end
+
+local function clampToScreen(sizeVec2, main)
+	local vp = getViewport()
+	local w, h = sizeVec2.X, sizeVec2.Y
+
+	local cx = main.Position.X.Offset
+	local cy = main.Position.Y.Offset
+
+	local halfW = w * 0.5
+	local halfH = h * 0.5
+	local margin = 8
+
+	local minX = halfW + margin
+	local maxX = vp.X - halfW - margin
+	local minY = halfH + margin
+	local maxY = vp.Y - halfH - margin
+
+	if minX > maxX then cx = vp.X * 0.5 else cx = math.clamp(cx, minX, maxX) end
+	if minY > maxY then cy = vp.Y * 0.5 else cy = math.clamp(cy, minY, maxY) end
+
+	main.Position = UDim2.fromOffset(cx, cy)
+end
+
+-- Toast (bottom-right)
+local toastFrame, toastHideTask
+local function ShowToast(gui, msg)
+	if toastHideTask then
+		task.cancel(toastHideTask)
+		toastHideTask = nil
+	end
+	if toastFrame then
+		toastFrame:Destroy()
+		toastFrame = nil
+	end
+
+	toastFrame = Instance.new("Frame")
+	toastFrame.BackgroundColor3 = Theme.Card
+	toastFrame.BorderSizePixel = 0
+	toastFrame.AnchorPoint = Vector2.new(1, 1)
+	toastFrame.Position = UDim2.new(1, -18, 1, -18)
+	toastFrame.Size = UDim2.fromOffset(260, 44)
+	toastFrame.Parent = gui
+	toastFrame.ZIndex = 200
+	corner(toastFrame, 16)
+	stroke(toastFrame, Theme.Accent, 0.75, 2)
+	stroke(toastFrame, Theme.Stroke, 0.90, 1)
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 12)
+	pad.PaddingRight = UDim.new(0, 12)
+	pad.Parent = toastFrame
+
+	local t = Instance.new("TextLabel")
+	t.BackgroundTransparency = 1
+	t.Size = UDim2.new(1, 0, 1, 0)
+	t.Font = Enum.Font.GothamSemibold
+	t.TextSize = 13
+	t.TextColor3 = Theme.Text
+	t.TextXAlignment = Enum.TextXAlignment.Left
+	t.Text = msg
+	t.Parent = toastFrame
+
+	-- slide in
+	toastFrame.Position = UDim2.new(1, -18, 1, 20)
+	toastFrame.BackgroundTransparency = 1
+	tween(toastFrame, 0.18, {Position = UDim2.new(1, -18, 1, -18), BackgroundTransparency = 0})
+
+	toastHideTask = task.delay(1.5, function()
+		if toastFrame then
+			tween(toastFrame, 0.18, {Position = UDim2.new(1, -18, 1, 20), BackgroundTransparency = 1})
+			task.delay(0.20, function()
+				if toastFrame then
+					toastFrame:Destroy()
+					toastFrame = nil
+				end
+			end)
+		end
+	end)
+end
+
+local function copyToClipboard(url)
+	local ok = pcall(function()
+		if setclipboard then
+			setclipboard(url)
+		else
+			error("Clipboard not available")
+		end
+	end)
+	return ok
+end
+
+-- ScreenGui
+local gui = Instance.new("ScreenGui")
+gui.Name = "N0BD.HUB"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = playerGui
+
+-- Main window
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Size = UDim2.fromOffset(FULL_SIZE.X, FULL_SIZE.Y)
+main.AnchorPoint = Vector2.new(0.5, 0.5)
+main.BackgroundColor3 = Theme.BG
+main.BorderSizePixel = 0
+main.ClipsDescendants = true
+main.Parent = gui
+corner(main, R)
+main.ZIndex = 2
+
+do
+	local vp = getViewport()
+	main.Position = UDim2.fromOffset(vp.X * 0.5, vp.Y * 0.5)
+end
+
+-- UIScale on main
+local uiScale = main:FindFirstChildOfClass("UIScale")
+if not uiScale then
+	uiScale = Instance.new("UIScale")
+	uiScale.Parent = main
+end
+uiScale.Scale = 1
+
+-- Glow frame (sibling) + FIX: glow has its own UIScale mirrored from main UIScale
+local glowFrame = Instance.new("Frame")
+glowFrame.Name = "GlowFrame"
+glowFrame.AnchorPoint = main.AnchorPoint
+glowFrame.BackgroundTransparency = 1
+glowFrame.BorderSizePixel = 0
+glowFrame.ZIndex = 1
+glowFrame.Parent = gui
+corner(glowFrame, R)
+
+local glowOuter = stroke(glowFrame, Theme.Accent, 0.88, 8)
+local glowInner = stroke(glowFrame, Theme.Accent, 0.92, 3)
+stroke(main, Theme.Stroke, 0.78, 1)
+
+TweenService:Create(glowOuter, TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Transparency = 0.94}):Play()
+TweenService:Create(glowInner, TweenInfo.new(1.0, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Transparency = 0.86}):Play()
+
+local glowScale = Instance.new("UIScale")
+glowScale.Scale = uiScale.Scale
+glowScale.Parent = glowFrame
+uiScale:GetPropertyChangedSignal("Scale"):Connect(function()
+	glowScale.Scale = uiScale.Scale
+end)
+
+-- Hard sync glow size/pos to main (always)
+local function syncGlowNow()
+	glowFrame.Position = main.Position
+	glowFrame.Size = main.Size
+end
+
+local syncConn = RunService.RenderStepped:Connect(function()
+	if not gui.Parent then
+		if syncConn then syncConn:Disconnect() end
+		return
+	end
+	syncGlowNow()
+end)
+
+-- Topbar
+local topbar = Instance.new("Frame")
+topbar.Name = "Topbar"
+topbar.Size = UDim2.new(1, 0, 0, TOP_H)
+topbar.BackgroundColor3 = Theme.Top
+topbar.BorderSizePixel = 0
+topbar.ClipsDescendants = true
+topbar.Parent = main
+corner(topbar, R)
+
+-- Glow line
+local glowLine = Instance.new("Frame")
+glowLine.Name = "GlowLine"
+glowLine.Size = UDim2.new(1, -28, 0, 2)
+glowLine.Position = UDim2.fromOffset(14, TOP_H - 2)
+glowLine.BackgroundColor3 = Theme.Accent
+glowLine.BackgroundTransparency = 0.25
+glowLine.BorderSizePixel = 0
+glowLine.Parent = topbar
+corner(glowLine, 8)
+
+TweenService:Create(glowLine, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+	BackgroundTransparency = 0.55
+}):Play()
+
+local function topButton(text, color)
+	local b = Instance.new("TextButton")
+	b.AutoButtonColor = false
+	b.BackgroundColor3 = Theme.Card
+	b.BorderSizePixel = 0
+	b.Size = UDim2.fromOffset(44, 32)
+	b.Text = text
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 14
+	b.TextColor3 = color
+	corner(b, 14)
+	stroke(b, Theme.Stroke, 0.90, 1)
+	stroke(b, Theme.Accent, 0.94, 3)
+
+	b.MouseEnter:Connect(function()
+		tween(b, 0.12, {BackgroundColor3 = Color3.fromRGB(18, 36, 78)})
+	end)
+	b.MouseLeave:Connect(function()
+		tween(b, 0.12, {BackgroundColor3 = Theme.Card})
+	end)
+
+	return b
+end
+
+-- Discord button LEFT in topbar (copies link)
+local discordTopBtn = topButton("DC", Theme.Accent)
+discordTopBtn.Name = "DiscordTop"
+discordTopBtn.Position = UDim2.fromOffset(14, 12)
+discordTopBtn.Parent = topbar
+discordTopBtn.MouseButton1Click:Connect(function()
+	local ok = copyToClipboard(DISCORD_URL)
+	if ok then
+		ShowToast(gui, "✅ Discord link copied!")
+	else
+		ShowToast(gui, "❌ Clipboard not available")
+	end
+end)
+
+-- Centered title
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.BackgroundTransparency = 1
+title.AnchorPoint = Vector2.new(0.5, 0.5)
+title.Position = UDim2.new(0.5, 0, 0.5, 0)
+title.Size = UDim2.new(0, 260, 1, 0)
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 20
+title.TextColor3 = Theme.Text
+title.TextXAlignment = Enum.TextXAlignment.Center
+title.Text = "N0BD.HUB"
+title.Parent = topbar
+
+-- Right buttons
+local btnHolder = Instance.new("Frame")
+btnHolder.Name = "BtnHolder"
+btnHolder.BackgroundTransparency = 1
+btnHolder.Size = UDim2.fromOffset(140, TOP_H)
+btnHolder.Position = UDim2.new(1, -140, 0, 0)
+btnHolder.Parent = topbar
+
+local minimizeBtn = topButton("—", Theme.Text)
+minimizeBtn.Position = UDim2.fromOffset(40, 12)
+minimizeBtn.Parent = btnHolder
+
+local closeBtn = topButton("X", Theme.Danger)
+closeBtn.Position = UDim2.fromOffset(90, 12)
+closeBtn.Parent = btnHolder
+
+-- Restore button for mini mode (text = N0BD.HUB)
+local restoreBtn = Instance.new("TextButton")
+restoreBtn.Name = "RestoreBtn"
+restoreBtn.AutoButtonColor = false
+restoreBtn.BackgroundColor3 = Theme.Card
+restoreBtn.BorderSizePixel = 0
+restoreBtn.Size = UDim2.fromOffset(108, 36)
+restoreBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+restoreBtn.Position = UDim2.new(0.5, 0, 0.5, 0)
+restoreBtn.Text = "N0BD.HUB"
+restoreBtn.Font = Enum.Font.GothamBold
+restoreBtn.TextSize = 12
+restoreBtn.TextColor3 = Theme.Accent
+restoreBtn.Visible = false
+restoreBtn.Parent = topbar
+corner(restoreBtn, 18)
+stroke(restoreBtn, Theme.Accent, 0.75, 3)
+stroke(restoreBtn, Theme.Stroke, 0.90, 1)
+
+-- Body
+local body = Instance.new("Frame")
+body.Name = "Body"
+body.Size = UDim2.new(1, 0, 1, -TOP_H)
+body.Position = UDim2.fromOffset(0, TOP_H)
+body.BackgroundTransparency = 1
+body.BorderSizePixel = 0
+body.Parent = main
+
+-- Sidebar + content
+local SIDEBAR_W = 176
+local GAP = 14
+local MARGIN = 18
+
+local sidebar = Instance.new("Frame")
+sidebar.Name = "Sidebar"
+sidebar.BackgroundColor3 = Theme.Panel
+sidebar.BorderSizePixel = 0
+sidebar.Position = UDim2.fromOffset(MARGIN, MARGIN)
+sidebar.Size = UDim2.new(0, SIDEBAR_W, 1, -(MARGIN * 2))
+sidebar.Parent = body
+corner(sidebar, 18)
+stroke(sidebar, Theme.Stroke, 0.88, 1)
+stroke(sidebar, Theme.Accent, 0.93, 3)
+
+local sidePad = Instance.new("UIPadding")
+sidePad.PaddingTop = UDim.new(0, 12)
+sidePad.PaddingBottom = UDim.new(0, 12)
+sidePad.PaddingLeft = UDim.new(0, 12)
+sidePad.PaddingRight = UDim.new(0, 12)
+sidePad.Parent = sidebar
+
+local sideList = Instance.new("UIListLayout")
+sideList.SortOrder = Enum.SortOrder.LayoutOrder
+sideList.Padding = UDim.new(0, 10)
+sideList.Parent = sidebar
+
+local content = Instance.new("Frame")
+content.Name = "Content"
+content.BackgroundColor3 = Theme.Panel
+content.BorderSizePixel = 0
+content.Position = UDim2.fromOffset(MARGIN + SIDEBAR_W + GAP, MARGIN)
+content.Size = UDim2.new(1, -(MARGIN + SIDEBAR_W + GAP + MARGIN), 1, -(MARGIN * 2))
+content.Parent = body
+corner(content, 18)
+stroke(content, Theme.Stroke, 0.88, 1)
+stroke(content, Theme.Accent, 0.93, 3)
+
+local contentPad = Instance.new("UIPadding")
+contentPad.PaddingTop = UDim.new(0, 12)
+contentPad.PaddingBottom = UDim.new(0, 12)
+contentPad.PaddingLeft = UDim.new(0, 12)
+contentPad.PaddingRight = UDim.new(0, 12)
+contentPad.Parent = content
+
+-- Pages (only Main)
+local pageMain = Instance.new("Frame")
+pageMain.Name = "Main"
+pageMain.BackgroundTransparency = 1
+pageMain.Size = UDim2.new(1, 0, 1, 0)
+pageMain.Parent = content
+
+-- Page header
+local header = Instance.new("Frame")
+header.BackgroundTransparency = 1
+header.Size = UDim2.new(1, 0, 0, 44)
+header.Parent = pageMain
+
+local headerLabel = Instance.new("TextLabel")
+headerLabel.BackgroundTransparency = 1
+headerLabel.Size = UDim2.new(1, 0, 1, 0)
+headerLabel.Font = Enum.Font.GothamBold
+headerLabel.TextSize = 16
+headerLabel.TextColor3 = Theme.Text
+headerLabel.TextXAlignment = Enum.TextXAlignment.Left
+headerLabel.Text = "Main"
+headerLabel.Parent = header
+
+-- UI Scale card in Main
+local settingsCard = Instance.new("Frame")
+settingsCard.Name = "SettingsCard"
+settingsCard.BackgroundColor3 = Theme.Card
+settingsCard.BorderSizePixel = 0
+settingsCard.Position = UDim2.fromOffset(0, 44)
+settingsCard.Size = UDim2.new(1, 0, 0, 120)
+settingsCard.ClipsDescendants = true
+settingsCard.Parent = pageMain
+corner(settingsCard, 18)
+stroke(settingsCard, Theme.Stroke, 0.90, 1)
+stroke(settingsCard, Theme.Accent, 0.94, 3)
+
+local settingsPad = Instance.new("UIPadding")
+settingsPad.PaddingTop = UDim.new(0, 14)
+settingsPad.PaddingBottom = UDim.new(0, 14)
+settingsPad.PaddingLeft = UDim.new(0, 14)
+settingsPad.PaddingRight = UDim.new(0, 14)
+settingsPad.Parent = settingsCard
+
+local cardTitle = Instance.new("TextLabel")
+cardTitle.BackgroundTransparency = 1
+cardTitle.Size = UDim2.new(1, 0, 0, 18)
+cardTitle.Font = Enum.Font.GothamSemibold
+cardTitle.TextSize = 14
+cardTitle.TextColor3 = Theme.Text
+cardTitle.TextXAlignment = Enum.TextXAlignment.Left
+cardTitle.Text = "UI Scale"
+cardTitle.Parent = settingsCard
+
+local scaleLabel = Instance.new("TextLabel")
+scaleLabel.BackgroundTransparency = 1
+scaleLabel.Position = UDim2.fromOffset(0, 24)
+scaleLabel.Size = UDim2.new(1, 0, 0, 18)
+scaleLabel.Font = Enum.Font.Gotham
+scaleLabel.TextSize = 12
+scaleLabel.TextColor3 = Theme.SubText
+scaleLabel.TextXAlignment = Enum.TextXAlignment.Left
+scaleLabel.Text = "UI Scale: 100%"
+scaleLabel.Parent = settingsCard
+
+local bar = Instance.new("Frame")
+bar.Position = UDim2.fromOffset(0, 60)
+bar.Size = UDim2.new(1, 0, 0, 10)
+bar.BackgroundColor3 = Color3.fromRGB(16, 26, 54)
+bar.BorderSizePixel = 0
+bar.Parent = settingsCard
+corner(bar, 999)
+stroke(bar, Theme.Stroke, 0.92, 1)
+
+local fill = Instance.new("Frame")
+fill.Size = UDim2.new(0.5, 0, 1, 0)
+fill.BackgroundColor3 = Theme.Accent
+fill.BorderSizePixel = 0
+fill.Parent = bar
+corner(fill, 999)
+
+local knob = Instance.new("Frame")
+knob.Size = UDim2.fromOffset(18, 18)
+knob.BackgroundColor3 = Theme.Text
+knob.BorderSizePixel = 0
+knob.Parent = bar
+corner(knob, 999)
+stroke(knob, Theme.Stroke, 0.60, 1)
+
+local MIN_SCALE = 0.8
+local MAX_SCALE = 1.2
+local dragging = false
+
+local function setScaleFromX(x)
+	local rel = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+	local scale = MIN_SCALE + (MAX_SCALE - MIN_SCALE) * rel
+	scale = math.floor(scale * 100) / 100
+
+	uiScale.Scale = scale
+	fill.Size = UDim2.new(rel, 0, 1, 0)
+	knob.Position = UDim2.new(rel, -9, 0.5, -9)
+	scaleLabel.Text = ("UI Scale: %d%%"):format(math.floor(scale * 100 + 0.5))
+end
+
+-- init slider
+do
+	local rel = (uiScale.Scale - MIN_SCALE) / (MAX_SCALE - MIN_SCALE)
+	rel = math.clamp(rel, 0, 1)
+	fill.Size = UDim2.new(rel, 0, 1, 0)
+	knob.Position = UDim2.new(rel, -9, 0.5, -9)
+	scaleLabel.Text = ("UI Scale: %d%%"):format(math.floor(uiScale.Scale * 100 + 0.5))
+end
+
+bar.InputBegan:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		setScaleFromX(i.Position.X)
+	end
+end)
+UIS.InputChanged:Connect(function(i)
+	if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+		setScaleFromX(i.Position.X)
+	end
+end)
+UIS.InputEnded:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = false
+	end
+end)
+
+-- Sidebar tab (only Main)
+local tabMain = Instance.new("TextButton")
+tabMain.AutoButtonColor = false
+tabMain.BackgroundColor3 = Color3.fromRGB(18, 44, 92)
+tabMain.BorderSizePixel = 0
+tabMain.Size = UDim2.new(1, 0, 0, 42)
+tabMain.Font = Enum.Font.GothamSemibold
+tabMain.TextSize = 13
+tabMain.TextColor3 = Theme.Accent
+tabMain.TextXAlignment = Enum.TextXAlignment.Left
+tabMain.Text = "   Main"
+tabMain.Parent = sidebar
+corner(tabMain, 16)
+stroke(tabMain, Theme.Stroke, 0.92, 1)
+
+-- ===== Improved minimize =====
+local minimized = false
+local busy = false
+local savedPos = main.Position
+local savedSize = main.Size
+
+local function applyMinimizedVisuals(on)
+	body.Visible = not on
+	btnHolder.Visible = not on
+	discordTopBtn.Visible = not on
+	title.Visible = not on
+	glowLine.Visible = not on
+
+	restoreBtn.Visible = on
+
+	if on then
+		topbar.Size = UDim2.new(1, 0, 1, 0) -- fill mini window
+	else
+		topbar.Size = UDim2.new(1, 0, 0, TOP_H)
+	end
+end
+
+local function setMinimized(on)
+	if busy then return end
+	busy = true
+
+	if on and not minimized then
+		savedPos = main.Position
+		savedSize = main.Size
+	end
+
+	minimized = on
+	applyMinimizedVisuals(on)
+
+	if on then
+		tween(main, 0.18, {Size = UDim2.fromOffset(MINI_SIZE.X, MINI_SIZE.Y)}).Completed:Wait()
+		clampToScreen(MINI_SIZE, main)
+	else
+		main.Position = savedPos
+		main.Size = savedSize
+		clampToScreen(FULL_SIZE, main)
+
+		tween(main, 0.22, {Size = UDim2.fromOffset(FULL_SIZE.X, FULL_SIZE.Y)}).Completed:Wait()
+		applyMinimizedVisuals(false)
+	end
+
+	busy = false
+end
+
+minimizeBtn.MouseButton1Click:Connect(function()
+	setMinimized(true)
+end)
+
+restoreBtn.MouseButton1Click:Connect(function()
+	setMinimized(false)
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+	tween(main, 0.18, {Size = UDim2.fromOffset(520, 0)})
+	task.delay(0.2, function()
+		if syncConn then syncConn:Disconnect() end
+		gui:Destroy()
+	end)
+end)
+
+-- Dragging + clamp (full + mini)
+do
+	local draggingWin = false
+	local startMouse, startPos
+
+	topbar.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 then
+			draggingWin = true
+			startMouse = i.Position
+			startPos = main.Position
+		end
+	end)
+
+	UIS.InputChanged:Connect(function(i)
+		if draggingWin and i.UserInputType == Enum.UserInputType.MouseMovement then
+			local delta = i.Position - startMouse
+			main.Position = UDim2.fromOffset(startPos.X.Offset + delta.X, startPos.Y.Offset + delta.Y)
+			clampToScreen(minimized and MINI_SIZE or FULL_SIZE, main)
+		end
+	end)
+
+	UIS.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 then
+			draggingWin = false
+			clampToScreen(minimized and MINI_SIZE or FULL_SIZE, main)
+		end
+	end)
+end
+
+-- Intro
+main.Size = UDim2.fromOffset(FULL_SIZE.X - 40, 0)
+tween(main, 0.30, {Size = UDim2.fromOffset(FULL_SIZE.X, FULL_SIZE.Y)})
+task.defer(function()
+	clampToScreen(FULL_SIZE, main)
+end)
