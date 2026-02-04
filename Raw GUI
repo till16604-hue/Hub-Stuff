@@ -1,5 +1,8 @@
--- Nothing To Steal here, its just the ui lol
-
+-- =========================
+-- SAFE BOOTSTRAP (obfuscation-proof)
+-- FULL UI (copy/paste)
+-- Includes: UI-matched Toast + 2-line Rejoin description + compact mini + locked mini position
+-- =========================
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -44,6 +47,7 @@ local function RUN_UI()
 	local UIS = game:GetService("UserInputService")
 	local RunService = game:GetService("RunService")
 	local TextService = game:GetService("TextService")
+	local TeleportService = game:GetService("TeleportService")
 
 	local player = Players.LocalPlayer
 	local playerGui = player:WaitForChild("PlayerGui")
@@ -73,8 +77,8 @@ local function RUN_UI()
 	local TOP_H = 56
 
 	local FULL_SIZE = Vector2.new(680, 400)
-	local MINI_SIZE = Vector2.new(140, 40) -- ✅ compact mini window
-	local MINI_R = 18 -- ✅ pill radius in mini mode
+	local MINI_SIZE = Vector2.new(140, 40) -- compact mini window
+	local MINI_R = 18
 
 	-- =========================================================
 	-- Obfuscation safety helpers (prevents "size out of range")
@@ -111,7 +115,7 @@ local function RUN_UI()
 		return tw
 	end
 
-	-- UI helpers
+	-- Helpers
 	local function corner(parent, px)
 		local c = Instance.new("UICorner")
 		c.CornerRadius = UDim.new(0, px)
@@ -150,7 +154,7 @@ local function RUN_UI()
 		return Vector2.new(1920, 1080)
 	end
 
-	-- Offset-only clamp (works with AnchorPoint 0,0)
+	-- Offset-only clamp (AnchorPoint 0,0)
 	local function clampToScreen(sizeVec2, frame)
 		local vp = getViewport()
 		local w, h = sizeVec2.X, sizeVec2.Y
@@ -175,9 +179,14 @@ local function RUN_UI()
 		return SAFE_OFFSET(math.floor((vp.X - width) * 0.5), y)
 	end
 
-	-- Toast (bottom-right)
+	-- =========================================================
+	-- UI-MATCHED Toast (bottom-right, auto width)
+	-- + global access: getgenv().N0BD_Toast("msg")
+	-- =========================================================
 	local toastFrame, toastHideTask
 	local function ShowToast(gui, msg)
+		msg = tostring(msg or "")
+
 		if toastHideTask then
 			task.cancel(toastHideTask)
 			toastHideTask = nil
@@ -187,12 +196,21 @@ local function RUN_UI()
 			toastFrame = nil
 		end
 
+		local font = Enum.Font.GothamSemibold
+		local textSize = 13
+		local paddingX = 24
+		local minW, maxW = 220, 420
+
+		local textBounds = TextService:GetTextSize(msg, textSize, font, Vector2.new(9999, 44)).X
+		local w = math.clamp(math.floor(textBounds + paddingX + 12), minW, maxW)
+
 		toastFrame = Instance.new("Frame")
+		toastFrame.Name = "Toast"
 		toastFrame.BackgroundColor3 = Theme.Card
 		toastFrame.BorderSizePixel = 0
 		toastFrame.AnchorPoint = Vector2.new(1, 1)
-		toastFrame.Position = UDim2.new(1, -18, 1, -18)
-		toastFrame.Size = SAFE_OFFSET(260, 44)
+		toastFrame.Position = UDim2.new(1, -18, 1, 20)
+		toastFrame.Size = SAFE_OFFSET(w, 44)
 		toastFrame.Parent = gui
 		toastFrame.ZIndex = 200
 		corner(toastFrame, 16)
@@ -207,18 +225,17 @@ local function RUN_UI()
 		local t = Instance.new("TextLabel")
 		t.BackgroundTransparency = 1
 		t.Size = UDim2.new(1, 0, 1, 0)
-		t.Font = Enum.Font.GothamSemibold
-		t.TextSize = 13
+		t.Font = font
+		t.TextSize = textSize
 		t.TextColor3 = Theme.Text
 		t.TextXAlignment = Enum.TextXAlignment.Left
 		t.Text = msg
 		t.Parent = toastFrame
 
-		toastFrame.Position = UDim2.new(1, -18, 1, 20)
 		toastFrame.BackgroundTransparency = 1
 		safeTween(toastFrame, 0.18, {Position = UDim2.new(1, -18, 1, -18), BackgroundTransparency = 0})
 
-		toastHideTask = task.delay(1.5, function()
+		toastHideTask = task.delay(1.6, function()
 			if toastFrame then
 				safeTween(toastFrame, 0.18, {Position = UDim2.new(1, -18, 1, 20), BackgroundTransparency = 1})
 				task.delay(0.20, function()
@@ -229,6 +246,14 @@ local function RUN_UI()
 				end)
 			end
 		end)
+	end
+
+	local function setGlobalToast(gui)
+		getgenv().N0BD_Toast = function(message)
+			if gui and gui.Parent then
+				ShowToast(gui, message)
+			end
+		end
 	end
 
 	local function copyToClipboard(url)
@@ -242,7 +267,9 @@ local function RUN_UI()
 		return ok
 	end
 
+	-- =========================================================
 	-- ScreenGui
+	-- =========================================================
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "N0BD.HUB"
 	gui.ResetOnSpawn = false
@@ -250,7 +277,11 @@ local function RUN_UI()
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.Parent = playerGui
 
+	setGlobalToast(gui)
+
+	-- =========================================================
 	-- Main window (OFFSET ONLY)
+	-- =========================================================
 	local main = Instance.new("Frame")
 	main.Name = "Main"
 	main.Size = SAFE_OFFSET(FULL_SIZE.X, FULL_SIZE.Y)
@@ -273,7 +304,9 @@ local function RUN_UI()
 	uiScale.Scale = 1
 	uiScale.Parent = main
 
+	-- =========================================================
 	-- Glow frame (sibling)
+	-- =========================================================
 	local glowFrame = Instance.new("Frame")
 	glowFrame.Name = "GlowFrame"
 	glowFrame.AnchorPoint = main.AnchorPoint
@@ -311,7 +344,9 @@ local function RUN_UI()
 		syncGlowNow()
 	end)
 
+	-- =========================================================
 	-- Topbar
+	-- =========================================================
 	local topbar = Instance.new("Frame")
 	topbar.Name = "Topbar"
 	topbar.Size = UDim2.new(1, 0, 0, TOP_H)
@@ -321,7 +356,6 @@ local function RUN_UI()
 	topbar.Parent = main
 	corner(topbar, R)
 
-	-- Glow line
 	local glowLine = Instance.new("Frame")
 	glowLine.Name = "GlowLine"
 	glowLine.Size = UDim2.new(1, -28, 0, 2)
@@ -368,7 +402,7 @@ local function RUN_UI()
 		return b
 	end
 
-	-- Discord button LEFT in topbar (copies link)
+	-- Discord button LEFT (copies link)
 	local discordTopBtn = topButton("Discord", Theme.Accent)
 	discordTopBtn.Name = "DiscordTop"
 	discordTopBtn.Position = SAFE_OFFSET(14, 12)
@@ -444,7 +478,9 @@ local function RUN_UI()
 		safeTween(restoreBtn, 0.12, {BackgroundColor3 = Theme.Card})
 	end)
 
+	-- =========================================================
 	-- Body
+	-- =========================================================
 	local body = Instance.new("Frame")
 	body.Name = "Body"
 	body.Size = UDim2.new(1, 0, 1, -TOP_H)
@@ -499,14 +535,15 @@ local function RUN_UI()
 	contentPad.PaddingRight = UDim.new(0, 12)
 	contentPad.Parent = content
 
-	-- Pages (only Main)
+	-- =========================================================
+	-- Main Page
+	-- =========================================================
 	local pageMain = Instance.new("Frame")
 	pageMain.Name = "Main"
 	pageMain.BackgroundTransparency = 1
 	pageMain.Size = UDim2.new(1, 0, 1, 0)
 	pageMain.Parent = content
 
-	-- Page header
 	local header = Instance.new("Frame")
 	header.BackgroundTransparency = 1
 	header.Size = UDim2.new(1, 0, 0, 44)
@@ -522,7 +559,9 @@ local function RUN_UI()
 	headerLabel.Text = "Main"
 	headerLabel.Parent = header
 
-	-- UI Scale card in Main
+	-- =========================================================
+	-- UI Scale card
+	-- =========================================================
 	local settingsCard = Instance.new("Frame")
 	settingsCard.Name = "SettingsCard"
 	settingsCard.BackgroundColor3 = Theme.Card
@@ -628,7 +667,7 @@ local function RUN_UI()
 		end
 	end)
 
-	-- Sidebar tab (only Main)
+	-- Sidebar tab (Main)
 	local tabMain = Instance.new("TextButton")
 	tabMain.AutoButtonColor = false
 	tabMain.BackgroundColor3 = Color3.fromRGB(18, 44, 92)
@@ -644,10 +683,8 @@ local function RUN_UI()
 	stroke(tabMain, Theme.Stroke, 0.92, 1)
 
 	-- =========================================================
-	-- Rejoin Same Server card (Main tab)
+	-- Rejoin Same Server card (FIXED TEXT ALIGN + 2-LINE WRAP)
 	-- =========================================================
-	local TeleportService = game:GetService("TeleportService")
-
 	local rejoinCard = Instance.new("Frame")
 	rejoinCard.Name = "RejoinCard"
 	rejoinCard.BackgroundColor3 = Theme.Card
@@ -667,26 +704,43 @@ local function RUN_UI()
 	rejoinPad.PaddingRight = UDim.new(0, 14)
 	rejoinPad.Parent = rejoinCard
 
+	-- Left text container (stacked, centered)
+	local textWrap = Instance.new("Frame")
+	textWrap.Name = "TextWrap"
+	textWrap.BackgroundTransparency = 1
+	textWrap.Size = UDim2.new(1, -170, 1, 0) -- space for button
+	textWrap.Parent = rejoinCard
+
+	local textList = Instance.new("UIListLayout")
+	textList.SortOrder = Enum.SortOrder.LayoutOrder
+	textList.Padding = UDim.new(0, 4)
+	textList.VerticalAlignment = Enum.VerticalAlignment.Center
+	textList.Parent = textWrap
+
 	local rejoinTitle = Instance.new("TextLabel")
 	rejoinTitle.BackgroundTransparency = 1
-	rejoinTitle.Size = UDim2.new(1, -160, 0, 18)
+	rejoinTitle.Size = UDim2.new(1, 0, 0, 18)
 	rejoinTitle.Font = Enum.Font.GothamSemibold
 	rejoinTitle.TextSize = 14
 	rejoinTitle.TextColor3 = Theme.Text
 	rejoinTitle.TextXAlignment = Enum.TextXAlignment.Left
 	rejoinTitle.Text = "Rejoin Same Server"
-	rejoinTitle.Parent = rejoinCard
+	rejoinTitle.LayoutOrder = 1
+	rejoinTitle.Parent = textWrap
 
 	local rejoinDesc = Instance.new("TextLabel")
 	rejoinDesc.BackgroundTransparency = 1
-	rejoinDesc.Position = SAFE_OFFSET(0, 22)
-	rejoinDesc.Size = UDim2.new(1, -160, 0, 18)
+	rejoinDesc.Size = UDim2.new(1, 0, 0, 32) -- ✅ enough for 2 lines
 	rejoinDesc.Font = Enum.Font.Gotham
 	rejoinDesc.TextSize = 12
 	rejoinDesc.TextColor3 = Theme.SubText
 	rejoinDesc.TextXAlignment = Enum.TextXAlignment.Left
+	rejoinDesc.TextYAlignment = Enum.TextYAlignment.Top
+	rejoinDesc.TextWrapped = true -- ✅ wrap
+	rejoinDesc.TextTruncate = Enum.TextTruncate.None
 	rejoinDesc.Text = "Rejoins this exact server (same JobId)."
-	rejoinDesc.Parent = rejoinCard
+	rejoinDesc.LayoutOrder = 2
+	rejoinDesc.Parent = textWrap
 
 	local rejoinBtn = Instance.new("TextButton")
 	rejoinBtn.Name = "RejoinBtn"
@@ -736,7 +790,7 @@ local function RUN_UI()
 	end)
 
 	-- =========================================================
-	-- Improved minimize (compact + pretty)
+	-- Improved minimize (compact + pretty) + mini locked top-center
 	-- =========================================================
 	local minimized = false
 	local busy = false
@@ -777,7 +831,7 @@ local function RUN_UI()
 
 		if on then
 			safeTween(main, 0.18, {Size = SAFE_OFFSET(MINI_SIZE.X, MINI_SIZE.Y)}).Completed:Wait()
-			main.Position = topCenterPos(MINI_SIZE.X, 8)
+			main.Position = topCenterPos(MINI_SIZE.X, 8) -- ✅ top center
 		else
 			main.Size = savedSize
 			main.Position = savedPos
