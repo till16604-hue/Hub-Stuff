@@ -521,7 +521,7 @@ local function Enable()
 	-- =========================
 	pcall(function() getgenv().Stairway = true end)
 
-	getgenv().N0BD_Toast("Made by Mikey, this is only a beta",2.5)
+	getgenv().N0BD_Toast("Made by Mikey, this is only a beta",10)
 	print("Made by Mikey, this is only a beta")
 
 	local function alive()
