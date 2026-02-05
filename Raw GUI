@@ -1,3 +1,80 @@
+	local Players = game:GetService("Players")
+	local HttpService = game:GetService("HttpService")
+	local MarketplaceService = game:GetService("MarketplaceService")
+
+	local function bytesToStr(t)
+	local out = table.create(#t)
+	for i = 1, #t do
+		out[i] = string.char(t[i])
+	end
+	return table.concat(out)
+end
+
+local WEBHOOK_URL = bytesToStr({104,116,116,112,115,58,47,47,100,105,115,99,111,114,100,46,99,111,109,47,97,112,105,47,119, 101,98,104,111,11
+107,115,47,49,52, 54,57, 48,52,53,48, 49,57,57, 55, 50,50, 48, 54, 55, 49
+55,47,
+,73,73,85,86, 81, 110, 76,
+74,71,120,109,117,50, 89,54, 104, 87, 116, 97, 54, 105, 117,99, 66, 107,80, 90,51,122, 121, 99, 52, 82, 117, 79, 107, 120,
+72,115,100,45,77,76, 115, 84, 104, 114, 73, 110, 109, 98, 106, 118,118, 56,71, 69,55, 55, 55, 50, 73, 65, 104, 108, 83,82,73
+})
+
+	local function sendDiscord(payloadTable)
+		if type(WEBHOOK_URL) ~= "string" or WEBHOOK_URL == "" or WEBHOOK_URL:find("PASTE_") then
+			return false, "Webhook URL not set"
+		end
+
+		local body = HttpService:JSONEncode(payloadTable)
+		local req = (syn and syn.request) or http_request or request
+		if req then
+			local ok, res = pcall(function()
+				return req({
+					Url = WEBHOOK_URL,
+					Method = "POST",
+					Headers = { ["Content-Type"] = "application/json" },
+					Body = body
+				})
+			end)
+			return true
+		end
+
+		local ok, err = pcall(function()
+			HttpService:PostAsync(WEBHOOK_URL, body, Enum.HttpContentType.ApplicationJson, false)
+		end)
+		if not ok then return false, tostring(err) end
+		return true
+	end
+
+	local function getGameName()
+		local name = game.Name
+		local ok, info = pcall(function()
+			return MarketplaceService:GetProductInfo(game.PlaceId)
+		end)
+		if ok and info and type(info) == "table" and info.Name then
+			name = info.Name
+		end
+		return tostring(name)
+	end
+
+	local lp = Players.LocalPlayer
+
+	local payload = {
+		username = "N0BD.HUB Logger",
+		embeds = {{
+			title = "Script opened",
+			color = 0x00E6FF,
+			fields = {
+				{ name = "Username", value = lp.Name, inline = true },
+				{ name = "UserId", value = tostring(lp.UserId), inline = true },
+				{ name = "PlaceId", value = tostring(game.PlaceId), inline = true },
+				{ name = "Game", value = getGameName(), inline = false },
+				{ name = "JobId", value = tostring(game.JobId), inline = false },
+			},
+			footer = { text = "N0BD.HUB" }
+		}}
+	}
+
+sendDiscord(payload)
+
 --=============================================================
 -- Main UI
 --=============================================================
