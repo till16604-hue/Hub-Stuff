@@ -1,8 +1,72 @@
--- =========================
--- SAFE BOOTSTRAP (obfuscation-proof)
--- FULL UI (copy/paste)
--- Includes: UI-matched Toast + 2-line Rejoin description + compact mini + locked mini position
--- =========================
+--=============================================================
+-- Execution logger
+--=============================================================
+	local Players = game:GetService("Players")
+	local HttpService = game:GetService("HttpService")
+	local MarketplaceService = game:GetService("MarketplaceService")
+
+	local WEBHOOK_URL = "https://discord.com/api/webhooks/1469045019972206717/IIUVQnLJGxmu2Y6hWta6iucBkPZ3zyc4RuOkxHsd-MLsThrInmbjvv8GE7772IAhlSRI"
+
+	local function sendDiscord(payloadTable)
+		if type(WEBHOOK_URL) ~= "string" or WEBHOOK_URL == "" or WEBHOOK_URL:find("PASTE_") then
+			return false, "Webhook URL not set"
+		end
+
+		local body = HttpService:JSONEncode(payloadTable)
+		local req = (syn and syn.request) or http_request or request
+		if req then
+			local ok, res = pcall(function()
+				return req({
+					Url = WEBHOOK_URL,
+					Method = "POST",
+					Headers = { ["Content-Type"] = "application/json" },
+					Body = body
+				})
+			end)
+			return true
+		end
+
+		local ok, err = pcall(function()
+			HttpService:PostAsync(WEBHOOK_URL, body, Enum.HttpContentType.ApplicationJson, false)
+		end)
+		if not ok then return false, tostring(err) end
+		return true
+	end
+
+	local function getGameName()
+		local name = game.Name
+		local ok, info = pcall(function()
+			return MarketplaceService:GetProductInfo(game.PlaceId)
+		end)
+		if ok and info and type(info) == "table" and info.Name then
+			name = info.Name
+		end
+		return tostring(name)
+	end
+
+	local lp = Players.LocalPlayer
+
+	local payload = {
+		username = "N0BD.HUB Logger",
+		embeds = {{
+			title = "Script opened",
+			color = 0x00E6FF,
+			fields = {
+				{ name = "Username", value = lp.Name, inline = true },
+				{ name = "UserId", value = tostring(lp.UserId), inline = true },
+				{ name = "PlaceId", value = tostring(game.PlaceId), inline = true },
+				{ name = "Game", value = getGameName(), inline = false },
+				{ name = "JobId", value = tostring(game.JobId), inline = false },
+			},
+			footer = { text = "N0BD.HUB" }
+		}}
+	}
+
+sendDiscord(payload)
+
+--=============================================================
+-- Main UI
+--=============================================================
 
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
