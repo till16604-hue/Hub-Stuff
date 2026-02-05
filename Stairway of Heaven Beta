@@ -562,7 +562,7 @@ local function Enable()
 		if not hrp then return end
 		hrp.CFrame = CFrame.new(630.6519165039062, 143.7024383544922, -1891.4598388671875)
 
-		for _ = 1, 10 do
+		for _ = 1, 5 do
 			if not alive() then return end
 			task.wait(0.1)
 		end
