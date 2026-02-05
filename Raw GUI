@@ -71,7 +71,7 @@ local WEBHOOK_URL = bytesToStr({104,116,116,112,115,58,47,47,100,105,115,99,111,
 sendDiscord(payload)
 
 --=============================================================
--- Main UI
+-- Main UI (Scroll + clean strokes + Anti-AFK template stub)
 --=============================================================
 
 local RunService = game:GetService("RunService")
@@ -123,7 +123,7 @@ local function RUN_UI()
 	local playerGui = player:WaitForChild("PlayerGui")
 
 	-- Discord invite (embedded)
-	local DISCORD_URL = "https://discord.gg/eDnvnQMag7"
+	local DISCORD_URL = "https://discord.gg/n0bd-hub"
 
 	-- Remove old UI
 	local old = playerGui:FindFirstChild("N0BD.HUB")
@@ -147,11 +147,11 @@ local function RUN_UI()
 	local TOP_H = 56
 
 	local FULL_SIZE = Vector2.new(680, 400)
-	local MINI_SIZE = Vector2.new(140, 40) -- compact mini window
+	local MINI_SIZE = Vector2.new(140, 40)
 	local MINI_R = 18
 
 	-- =========================================================
-	-- Obfuscation safety helpers (prevents "size out of range")
+	-- Obfuscation safety helpers
 	-- =========================================================
 	local function _safeNumber(n, fallback)
 		n = tonumber(n)
@@ -185,20 +185,27 @@ local function RUN_UI()
 		return tw
 	end
 
-	-- Helpers
-	local function corner(parent, px)
-		local c = Instance.new("UICorner")
-		c.CornerRadius = UDim.new(0, px)
-		c.Parent = parent
+	-- =========================================================
+	-- UI helpers (FIX: no double UICorner, strokes inside border)
+	-- =========================================================
+	local function ensureCorner(inst, defaultPx)
+		local c = inst:FindFirstChildOfClass("UICorner")
+		if not c then
+			c = Instance.new("UICorner")
+			c.Parent = inst
+		end
+		c.CornerRadius = UDim.new(0, defaultPx or 16)
 		return c
 	end
 
-	local function stroke(parent, color, transparency, thickness)
+	local function addStroke(inst, color, transparency, thickness)
 		local s = Instance.new("UIStroke")
 		s.Color = color
 		s.Thickness = thickness or 1
-		s.Transparency = transparency or 0.8
-		s.Parent = parent
+		s.Transparency = transparency or 0.85
+		s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border  -- ✅ important
+		s.LineJoinMode = Enum.LineJoinMode.Round         -- ✅ smoother corners
+		s.Parent = inst
 		return s
 	end
 
@@ -211,24 +218,16 @@ local function RUN_UI()
 				RunService.RenderStepped:Wait()
 			end
 		end
-
 		if cam then
-			local ok, vp = pcall(function()
-				return cam.ViewportSize
-			end)
-			if ok and vp then
-				return vp
-			end
+			local ok, vp = pcall(function() return cam.ViewportSize end)
+			if ok and vp then return vp end
 		end
-
 		return Vector2.new(1920, 1080)
 	end
 
-	-- Offset-only clamp (AnchorPoint 0,0)
 	local function clampToScreen(sizeVec2, frame)
 		local vp = getViewport()
 		local w, h = sizeVec2.X, sizeVec2.Y
-
 		local x = frame.Position.X.Offset
 		local y = frame.Position.Y.Offset
 
@@ -250,8 +249,7 @@ local function RUN_UI()
 	end
 
 	-- =========================================================
-	-- UI-MATCHED Toast (bottom-right, auto width)
-	-- + global access: getgenv().N0BD_Toast("msg")
+	-- Toast (global)
 	-- =========================================================
 	local toastFrame, toastHideTask
 	local function ShowToast(gui, msg)
@@ -283,9 +281,9 @@ local function RUN_UI()
 		toastFrame.Size = SAFE_OFFSET(w, 44)
 		toastFrame.Parent = gui
 		toastFrame.ZIndex = 200
-		corner(toastFrame, 16)
-		stroke(toastFrame, Theme.Accent, 0.75, 2)
-		stroke(toastFrame, Theme.Stroke, 0.90, 1)
+		ensureCorner(toastFrame, 16)
+		addStroke(toastFrame, Theme.Accent, 0.75, 2)
+		addStroke(toastFrame, Theme.Stroke, 0.90, 1)
 
 		local pad = Instance.new("UIPadding")
 		pad.PaddingLeft = UDim.new(0, 12)
@@ -346,11 +344,10 @@ local function RUN_UI()
 	gui.IgnoreGuiInset = true
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.Parent = playerGui
-
 	setGlobalToast(gui)
 
 	-- =========================================================
-	-- Main window (OFFSET ONLY)
+	-- Main window
 	-- =========================================================
 	local main = Instance.new("Frame")
 	main.Name = "Main"
@@ -360,8 +357,9 @@ local function RUN_UI()
 	main.BorderSizePixel = 0
 	main.ClipsDescendants = true
 	main.Parent = gui
-	corner(main, R)
 	main.ZIndex = 2
+	local mainCorner = ensureCorner(main, R)
+	addStroke(main, Theme.Stroke, 0.78, 1)
 
 	do
 		RunService.RenderStepped:Wait()
@@ -369,14 +367,11 @@ local function RUN_UI()
 		main.Position = SAFE_OFFSET(math.floor((vp.X - FULL_SIZE.X) * 0.5), math.floor((vp.Y - FULL_SIZE.Y) * 0.5))
 	end
 
-	-- UIScale on main
 	local uiScale = Instance.new("UIScale")
 	uiScale.Scale = 1
 	uiScale.Parent = main
 
-	-- =========================================================
-	-- Glow frame (sibling)
-	-- =========================================================
+	-- Glow frame
 	local glowFrame = Instance.new("Frame")
 	glowFrame.Name = "GlowFrame"
 	glowFrame.AnchorPoint = main.AnchorPoint
@@ -384,11 +379,10 @@ local function RUN_UI()
 	glowFrame.BorderSizePixel = 0
 	glowFrame.ZIndex = 1
 	glowFrame.Parent = gui
-	corner(glowFrame, R)
+	local glowCorner = ensureCorner(glowFrame, R)
 
-	local glowOuter = stroke(glowFrame, Theme.Accent, 0.88, 8)
-	local glowInner = stroke(glowFrame, Theme.Accent, 0.92, 3)
-	stroke(main, Theme.Stroke, 0.78, 1)
+	local glowOuter = addStroke(glowFrame, Theme.Accent, 0.88, 8)
+	local glowInner = addStroke(glowFrame, Theme.Accent, 0.92, 3)
 
 	TweenService:Create(glowOuter, TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Transparency = 0.94}):Play()
 	TweenService:Create(glowInner, TweenInfo.new(1.0, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Transparency = 0.86}):Play()
@@ -424,7 +418,7 @@ local function RUN_UI()
 	topbar.BorderSizePixel = 0
 	topbar.ClipsDescendants = true
 	topbar.Parent = main
-	corner(topbar, R)
+	local topbarCorner = ensureCorner(topbar, R)
 
 	local glowLine = Instance.new("Frame")
 	glowLine.Name = "GlowLine"
@@ -434,13 +428,12 @@ local function RUN_UI()
 	glowLine.BackgroundTransparency = 0.25
 	glowLine.BorderSizePixel = 0
 	glowLine.Parent = topbar
-	corner(glowLine, 8)
+	ensureCorner(glowLine, 8)
 
 	TweenService:Create(glowLine, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
 		BackgroundTransparency = 0.55
 	}):Play()
 
-	-- Top button with auto width
 	local function topButton(text, color)
 		local b = Instance.new("TextButton")
 		b.AutoButtonColor = false
@@ -458,9 +451,9 @@ local function RUN_UI()
 		local w = math.max(minW, tw + padX * 2)
 		b.Size = SAFE_OFFSET(w, 32)
 
-		corner(b, 14)
-		stroke(b, Theme.Stroke, 0.90, 1)
-		stroke(b, Theme.Accent, 0.94, 3)
+		ensureCorner(b, 14)
+		addStroke(b, Theme.Stroke, 0.90, 1)
+		addStroke(b, Theme.Accent, 0.94, 3)
 
 		b.MouseEnter:Connect(function()
 			safeTween(b, 0.12, {BackgroundColor3 = Color3.fromRGB(18, 36, 78)})
@@ -472,7 +465,6 @@ local function RUN_UI()
 		return b
 	end
 
-	-- Discord button LEFT (copies link)
 	local discordTopBtn = topButton("Discord", Theme.Accent)
 	discordTopBtn.Name = "DiscordTop"
 	discordTopBtn.Position = SAFE_OFFSET(14, 12)
@@ -486,7 +478,6 @@ local function RUN_UI()
 		end
 	end)
 
-	-- Centered title
 	local title = Instance.new("TextLabel")
 	title.Name = "Title"
 	title.BackgroundTransparency = 1
@@ -500,7 +491,6 @@ local function RUN_UI()
 	title.Text = "N0BD.HUB"
 	title.Parent = topbar
 
-	-- Right buttons holder (auto-size)
 	local btnHolder = Instance.new("Frame")
 	btnHolder.Name = "BtnHolder"
 	btnHolder.BackgroundTransparency = 1
@@ -523,7 +513,6 @@ local function RUN_UI()
 		minimizeBtn.Position = SAFE_OFFSET(closeBtn.Position.X.Offset - gap - minimizeBtn.Size.X.Offset, 12)
 	end
 
-	-- Restore button (pill in mini mode)
 	local restoreBtn = Instance.new("TextButton")
 	restoreBtn.Name = "RestoreBtn"
 	restoreBtn.AutoButtonColor = false
@@ -537,9 +526,9 @@ local function RUN_UI()
 	restoreBtn.TextColor3 = Theme.Accent
 	restoreBtn.Visible = false
 	restoreBtn.Parent = topbar
-	corner(restoreBtn, 999)
-	stroke(restoreBtn, Theme.Accent, 0.78, 2)
-	stroke(restoreBtn, Theme.Stroke, 0.92, 1)
+	ensureCorner(restoreBtn, 999)
+	addStroke(restoreBtn, Theme.Accent, 0.78, 2)
+	addStroke(restoreBtn, Theme.Stroke, 0.92, 1)
 
 	restoreBtn.MouseEnter:Connect(function()
 		safeTween(restoreBtn, 0.12, {BackgroundColor3 = Color3.fromRGB(18, 36, 78)})
@@ -559,7 +548,6 @@ local function RUN_UI()
 	body.BorderSizePixel = 0
 	body.Parent = main
 
-	-- Sidebar + content
 	local SIDEBAR_W = 176
 	local GAP = 14
 	local MARGIN = 18
@@ -571,9 +559,10 @@ local function RUN_UI()
 	sidebar.Position = SAFE_OFFSET(MARGIN, MARGIN)
 	sidebar.Size = UDim2.new(0, SIDEBAR_W, 1, -(MARGIN * 2))
 	sidebar.Parent = body
-	corner(sidebar, 18)
-	stroke(sidebar, Theme.Stroke, 0.88, 1)
-	stroke(sidebar, Theme.Accent, 0.93, 3)
+	sidebar.ClipsDescendants = false -- ✅ strokes won't look cut
+	ensureCorner(sidebar, 18)
+	addStroke(sidebar, Theme.Stroke, 0.88, 1)
+	addStroke(sidebar, Theme.Accent, 0.93, 3)
 
 	local sidePad = Instance.new("UIPadding")
 	sidePad.PaddingTop = UDim.new(0, 12)
@@ -594,9 +583,10 @@ local function RUN_UI()
 	content.Position = SAFE_OFFSET(MARGIN + SIDEBAR_W + GAP, MARGIN)
 	content.Size = UDim2.new(1, -(MARGIN + SIDEBAR_W + GAP + MARGIN), 1, -(MARGIN * 2))
 	content.Parent = body
-	corner(content, 18)
-	stroke(content, Theme.Stroke, 0.88, 1)
-	stroke(content, Theme.Accent, 0.93, 3)
+	content.ClipsDescendants = false
+	ensureCorner(content, 18)
+	addStroke(content, Theme.Stroke, 0.88, 1)
+	addStroke(content, Theme.Accent, 0.93, 3)
 
 	local contentPad = Instance.new("UIPadding")
 	contentPad.PaddingTop = UDim.new(0, 12)
@@ -606,18 +596,46 @@ local function RUN_UI()
 	contentPad.Parent = content
 
 	-- =========================================================
-	-- Main Page
+	-- Main Page (Scrolling)
 	-- =========================================================
-	local pageMain = Instance.new("Frame")
+	local pageMain = Instance.new("ScrollingFrame")
 	pageMain.Name = "Main"
 	pageMain.BackgroundTransparency = 1
 	pageMain.Size = UDim2.new(1, 0, 1, 0)
+	pageMain.CanvasSize = UDim2.new(0, 0, 0, 0)
+	pageMain.ScrollBarThickness = 5
+	pageMain.ScrollBarImageTransparency = 0.35
+	pageMain.BorderSizePixel = 0
+	pageMain.ScrollingDirection = Enum.ScrollingDirection.Y
+	pageMain.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
 	pageMain.Parent = content
 
+	local stack = Instance.new("Frame")
+	stack.Name = "Stack"
+	stack.BackgroundTransparency = 1
+	stack.Size = UDim2.new(1, 0, 0, 0)
+	stack.Parent = pageMain
+
+	local stackList = Instance.new("UIListLayout")
+	stackList.SortOrder = Enum.SortOrder.LayoutOrder
+	stackList.Padding = UDim.new(0, 12)
+	stackList.Parent = stack
+
+	local function updateCanvas()
+		local h = stackList.AbsoluteContentSize.Y
+		stack.Size = UDim2.new(1, 0, 0, h)
+		pageMain.CanvasSize = UDim2.new(0, 0, 0, h + 6)
+	end
+	stackList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
+	task.defer(updateCanvas)
+
+	-- Header
 	local header = Instance.new("Frame")
+	header.Name = "Header"
 	header.BackgroundTransparency = 1
 	header.Size = UDim2.new(1, 0, 0, 44)
-	header.Parent = pageMain
+	header.LayoutOrder = 1
+	header.Parent = stack
 
 	local headerLabel = Instance.new("TextLabel")
 	headerLabel.BackgroundTransparency = 1
@@ -629,27 +647,34 @@ local function RUN_UI()
 	headerLabel.Text = "Main"
 	headerLabel.Parent = header
 
+	-- Helper: Card factory
+	local function createCard(name, height)
+		local card = Instance.new("Frame")
+		card.Name = name
+		card.BackgroundColor3 = Theme.Card
+		card.BorderSizePixel = 0
+		card.Size = UDim2.new(1, 0, 0, height)
+		card.ClipsDescendants = true
+		card.Parent = stack
+		ensureCorner(card, 18)
+		addStroke(card, Theme.Stroke, 0.90, 1)
+		addStroke(card, Theme.Accent, 0.94, 3)
+
+		local pad = Instance.new("UIPadding")
+		pad.PaddingTop = UDim.new(0, 14)
+		pad.PaddingBottom = UDim.new(0, 14)
+		pad.PaddingLeft = UDim.new(0, 14)
+		pad.PaddingRight = UDim.new(0, 14)
+		pad.Parent = card
+
+		return card
+	end
+
 	-- =========================================================
 	-- UI Scale card
 	-- =========================================================
-	local settingsCard = Instance.new("Frame")
-	settingsCard.Name = "SettingsCard"
-	settingsCard.BackgroundColor3 = Theme.Card
-	settingsCard.BorderSizePixel = 0
-	settingsCard.Position = SAFE_OFFSET(0, 44)
-	settingsCard.Size = UDim2.new(1, 0, 0, 120)
-	settingsCard.ClipsDescendants = true
-	settingsCard.Parent = pageMain
-	corner(settingsCard, 18)
-	stroke(settingsCard, Theme.Stroke, 0.90, 1)
-	stroke(settingsCard, Theme.Accent, 0.94, 3)
-
-	local settingsPad = Instance.new("UIPadding")
-	settingsPad.PaddingTop = UDim.new(0, 14)
-	settingsPad.PaddingBottom = UDim.new(0, 14)
-	settingsPad.PaddingLeft = UDim.new(0, 14)
-	settingsPad.PaddingRight = UDim.new(0, 14)
-	settingsPad.Parent = settingsCard
+	local settingsCard = createCard("SettingsCard", 120)
+	settingsCard.LayoutOrder = 2
 
 	local cardTitle = Instance.new("TextLabel")
 	cardTitle.BackgroundTransparency = 1
@@ -678,23 +703,23 @@ local function RUN_UI()
 	bar.BackgroundColor3 = Color3.fromRGB(16, 26, 54)
 	bar.BorderSizePixel = 0
 	bar.Parent = settingsCard
-	corner(bar, 999)
-	stroke(bar, Theme.Stroke, 0.92, 1)
+	ensureCorner(bar, 999)
+	addStroke(bar, Theme.Stroke, 0.92, 1)
 
 	local fill = Instance.new("Frame")
 	fill.Size = UDim2.new(0.5, 0, 1, 0)
 	fill.BackgroundColor3 = Theme.Accent
 	fill.BorderSizePixel = 0
 	fill.Parent = bar
-	corner(fill, 999)
+	ensureCorner(fill, 999)
 
 	local knob = Instance.new("Frame")
 	knob.Size = SAFE_OFFSET(18, 18)
 	knob.BackgroundColor3 = Theme.Text
 	knob.BorderSizePixel = 0
 	knob.Parent = bar
-	corner(knob, 999)
-	stroke(knob, Theme.Stroke, 0.60, 1)
+	ensureCorner(knob, 999)
+	addStroke(knob, Theme.Stroke, 0.60, 1)
 
 	local MIN_SCALE = 0.8
 	local MAX_SCALE = 1.2
@@ -711,7 +736,6 @@ local function RUN_UI()
 		scaleLabel.Text = ("UI Scale: %d%%"):format(math.floor(scale * 100 + 0.5))
 	end
 
-	-- init slider
 	do
 		local rel = (uiScale.Scale - MIN_SCALE) / (MAX_SCALE - MIN_SCALE)
 		rel = math.clamp(rel, 0, 1)
@@ -737,48 +761,15 @@ local function RUN_UI()
 		end
 	end)
 
-	-- Sidebar tab (Main)
-	local tabMain = Instance.new("TextButton")
-	tabMain.AutoButtonColor = false
-	tabMain.BackgroundColor3 = Color3.fromRGB(18, 44, 92)
-	tabMain.BorderSizePixel = 0
-	tabMain.Size = UDim2.new(1, 0, 0, 42)
-	tabMain.Font = Enum.Font.GothamSemibold
-	tabMain.TextSize = 13
-	tabMain.TextColor3 = Theme.Accent
-	tabMain.TextXAlignment = Enum.TextXAlignment.Left
-	tabMain.Text = "   Main"
-	tabMain.Parent = sidebar
-	corner(tabMain, 16)
-	stroke(tabMain, Theme.Stroke, 0.92, 1)
-
 	-- =========================================================
-	-- Rejoin Same Server card (FIXED TEXT ALIGN + 2-LINE WRAP)
+	-- Rejoin card
 	-- =========================================================
-	local rejoinCard = Instance.new("Frame")
-	rejoinCard.Name = "RejoinCard"
-	rejoinCard.BackgroundColor3 = Theme.Card
-	rejoinCard.BorderSizePixel = 0
-	rejoinCard.Position = SAFE_OFFSET(0, 44 + 120 + 12)
-	rejoinCard.Size = UDim2.new(1, 0, 0, 92)
-	rejoinCard.ClipsDescendants = true
-	rejoinCard.Parent = pageMain
-	corner(rejoinCard, 18)
-	stroke(rejoinCard, Theme.Stroke, 0.90, 1)
-	stroke(rejoinCard, Theme.Accent, 0.94, 3)
+	local rejoinCard = createCard("RejoinCard", 92)
+	rejoinCard.LayoutOrder = 3
 
-	local rejoinPad = Instance.new("UIPadding")
-	rejoinPad.PaddingTop = UDim.new(0, 14)
-	rejoinPad.PaddingBottom = UDim.new(0, 14)
-	rejoinPad.PaddingLeft = UDim.new(0, 14)
-	rejoinPad.PaddingRight = UDim.new(0, 14)
-	rejoinPad.Parent = rejoinCard
-
-	-- Left text container (stacked, centered)
 	local textWrap = Instance.new("Frame")
-	textWrap.Name = "TextWrap"
 	textWrap.BackgroundTransparency = 1
-	textWrap.Size = UDim2.new(1, -170, 1, 0) -- space for button
+	textWrap.Size = UDim2.new(1, -170, 1, 0)
 	textWrap.Parent = rejoinCard
 
 	local textList = Instance.new("UIListLayout")
@@ -800,20 +791,18 @@ local function RUN_UI()
 
 	local rejoinDesc = Instance.new("TextLabel")
 	rejoinDesc.BackgroundTransparency = 1
-	rejoinDesc.Size = UDim2.new(1, 0, 0, 32) -- ✅ enough for 2 lines
+	rejoinDesc.Size = UDim2.new(1, 0, 0, 32)
 	rejoinDesc.Font = Enum.Font.Gotham
 	rejoinDesc.TextSize = 12
 	rejoinDesc.TextColor3 = Theme.SubText
 	rejoinDesc.TextXAlignment = Enum.TextXAlignment.Left
 	rejoinDesc.TextYAlignment = Enum.TextYAlignment.Top
-	rejoinDesc.TextWrapped = true -- ✅ wrap
-	rejoinDesc.TextTruncate = Enum.TextTruncate.None
+	rejoinDesc.TextWrapped = true
 	rejoinDesc.Text = "Rejoins this exact server (same JobId)."
 	rejoinDesc.LayoutOrder = 2
 	rejoinDesc.Parent = textWrap
 
 	local rejoinBtn = Instance.new("TextButton")
-	rejoinBtn.Name = "RejoinBtn"
 	rejoinBtn.AutoButtonColor = false
 	rejoinBtn.BackgroundColor3 = Theme.Card
 	rejoinBtn.BorderSizePixel = 0
@@ -825,9 +814,9 @@ local function RUN_UI()
 	rejoinBtn.TextColor3 = Theme.Text
 	rejoinBtn.Text = "REJOIN"
 	rejoinBtn.Parent = rejoinCard
-	corner(rejoinBtn, 16)
-	stroke(rejoinBtn, Theme.Stroke, 0.90, 1)
-	stroke(rejoinBtn, Theme.Accent, 0.94, 3)
+	ensureCorner(rejoinBtn, 16)
+	addStroke(rejoinBtn, Theme.Stroke, 0.90, 1)
+	addStroke(rejoinBtn, Theme.Accent, 0.94, 3)
 
 	rejoinBtn.MouseEnter:Connect(function()
 		safeTween(rejoinBtn, 0.12, {BackgroundColor3 = Color3.fromRGB(18, 36, 78)})
@@ -840,10 +829,8 @@ local function RUN_UI()
 	local function doRejoin()
 		if rejoining then return end
 		rejoining = true
-
 		rejoinBtn.Text = "REJOINING..."
 		rejoinBtn.TextColor3 = Theme.Accent
-		safeTween(rejoinBtn, 0.12, {BackgroundColor3 = Color3.fromRGB(18, 36, 78)})
 
 		task.delay(0.15, function()
 			pcall(function()
@@ -860,7 +847,151 @@ local function RUN_UI()
 	end)
 
 	-- =========================================================
-	-- Improved minimize (compact + pretty) + mini locked top-center
+	-- Anti-AFK card (UI + TEMPLATE STUB)
+	-- =========================================================
+	local antiAfkCard = createCard("AntiAfkCard", 92)
+	antiAfkCard.LayoutOrder = 4
+
+	local aaWrap = Instance.new("Frame")
+	aaWrap.BackgroundTransparency = 1
+	aaWrap.Size = UDim2.new(1, -170, 1, 0)
+	aaWrap.Parent = antiAfkCard
+
+	local aaList = Instance.new("UIListLayout")
+	aaList.SortOrder = Enum.SortOrder.LayoutOrder
+	aaList.Padding = UDim.new(0, 4)
+	aaList.VerticalAlignment = Enum.VerticalAlignment.Center
+	aaList.Parent = aaWrap
+
+	local aaTitle = Instance.new("TextLabel")
+	aaTitle.BackgroundTransparency = 1
+	aaTitle.Size = UDim2.new(1, 0, 0, 18)
+	aaTitle.Font = Enum.Font.GothamSemibold
+	aaTitle.TextSize = 14
+	aaTitle.TextColor3 = Theme.Text
+	aaTitle.TextXAlignment = Enum.TextXAlignment.Left
+	aaTitle.Text = "Anti-AFK"
+	aaTitle.LayoutOrder = 1
+	aaTitle.Parent = aaWrap
+
+	local aaStatus = Instance.new("TextLabel")
+	aaStatus.BackgroundTransparency = 1
+	aaStatus.Size = UDim2.new(1, 0, 0, 16)
+	aaStatus.Font = Enum.Font.Gotham
+	aaStatus.TextSize = 11
+	aaStatus.TextColor3 = Theme.SubText
+	aaStatus.TextXAlignment = Enum.TextXAlignment.Left
+	aaStatus.Text = "Status: OFF"
+	aaStatus.LayoutOrder = 3
+	aaStatus.Parent = aaWrap
+
+	local aaBtn = Instance.new("TextButton")
+	aaBtn.AutoButtonColor = false
+	aaBtn.BackgroundColor3 = Color3.fromRGB(16, 26, 54)
+	aaBtn.BorderSizePixel = 0
+	aaBtn.AnchorPoint = Vector2.new(1, 0.5)
+	aaBtn.Position = UDim2.new(1, 0, 0.5, 0)
+	aaBtn.Size = SAFE_OFFSET(150, 38)
+	aaBtn.Font = Enum.Font.GothamBold
+	aaBtn.TextSize = 12
+	aaBtn.TextColor3 = Theme.Text
+	aaBtn.Text = "OFF"
+	aaBtn.Parent = antiAfkCard
+	ensureCorner(aaBtn, 16)
+	local aaStroke = addStroke(aaBtn, Theme.Stroke, 0.90, 1)
+	addStroke(aaBtn, Theme.Accent, 0.94, 3)
+
+	local antiEnabled = false
+	local antiThread = nil
+	local ANTI_INTERVAL = 300 -- Delay here
+
+	local function AntiAfk_Start()
+		if antiThread then task.cancel(antiThread) end
+		antiEnabled = true
+
+		antiThread = task.spawn(function()
+			while antiEnabled do
+				task.wait(ANTI_INTERVAL)
+				if not antiEnabled then break end
+				if getgenv().N0BD_Toast then
+					getgenv().N0BD_Toast("No Kick for you Roblox")
+				end
+				local lp = game:GetService("Players").LocalPlayer
+				local ch = lp.Character or lp.CharacterAdded:Wait()
+				local hum = ch:FindFirstChildOfClass("Humanoid") or ch:waitForChild("Humanoid")
+				hum:ChangeState(Enum.HumanoidStateType.Jumping)
+				hum.Jump = true
+			end
+		end)
+
+	local function AntiAfk_Stop()
+		antiEnabled = false
+		if antiThread then
+			task.cancel(antiThread)
+			antiThread = nil
+		end
+	end
+
+
+		if getgenv().N0BD_Toast then
+			getgenv().N0BD_Toast("Anti-AFK started")
+		end
+	end
+
+	local function AntiAfk_Stop()
+		if antiThread then
+			pcall(function() task.cancel(antiThread) end)
+			antiThread = nil
+		end
+		if getgenv().N0BD_Toast then
+			getgenv().N0BD_Toast("Anti-AFK stopped.")
+		end
+	end
+
+	local function applyAntiVisuals()
+		if antiEnabled then
+			aaBtn.Text = "ON"
+			aaBtn.TextColor3 = Theme.Accent
+			aaStatus.Text = "Status: ON"
+			aaStroke.Transparency = 0.75
+		else
+			aaBtn.Text = "OFF"
+			aaBtn.TextColor3 = Theme.Text
+			aaStatus.Text = "Status: OFF"
+			aaStroke.Transparency = 0.90
+		end
+	end
+	applyAntiVisuals()
+
+	aaBtn.MouseButton1Click:Connect(function()
+		antiEnabled = not antiEnabled
+		applyAntiVisuals()
+		if antiEnabled then
+			AntiAfk_Start()
+		else
+			AntiAfk_Stop()
+		end
+	end)
+
+	-- =========================================================
+	-- Sidebar tab (Main)
+	-- =========================================================
+	local tabMain = Instance.new("TextButton")
+	tabMain.AutoButtonColor = false
+	tabMain.BackgroundColor3 = Color3.fromRGB(18, 44, 92)
+	tabMain.BorderSizePixel = 0
+	tabMain.Size = UDim2.new(1, 0, 0, 42)
+	tabMain.Font = Enum.Font.GothamSemibold
+	tabMain.TextSize = 13
+	tabMain.TextColor3 = Theme.Accent
+	tabMain.TextXAlignment = Enum.TextXAlignment.Left
+	tabMain.Text = "   Main"
+	tabMain.Parent = sidebar
+	ensureCorner(tabMain, 16)
+	addStroke(tabMain, Theme.Stroke, 0.92, 1)
+
+	-- =========================================================
+	-- Minimize (FIX: radius changes without adding new corners)
 	-- =========================================================
 	local minimized = false
 	local busy = false
@@ -873,17 +1004,18 @@ local function RUN_UI()
 		discordTopBtn.Visible = not on
 		title.Visible = not on
 		glowLine.Visible = not on
-
 		restoreBtn.Visible = on
 
 		if on then
 			topbar.Size = UDim2.new(1, 0, 1, 0)
-			corner(main, MINI_R)
-			corner(topbar, MINI_R)
+			mainCorner.CornerRadius = UDim.new(0, MINI_R)
+			topbarCorner.CornerRadius = UDim.new(0, MINI_R)
+			glowCorner.CornerRadius = UDim.new(0, MINI_R)
 		else
 			topbar.Size = UDim2.new(1, 0, 0, TOP_H)
-			corner(main, R)
-			corner(topbar, R)
+			mainCorner.CornerRadius = UDim.new(0, R)
+			topbarCorner.CornerRadius = UDim.new(0, R)
+			glowCorner.CornerRadius = UDim.new(0, R)
 		end
 	end
 
@@ -901,12 +1033,11 @@ local function RUN_UI()
 
 		if on then
 			safeTween(main, 0.18, {Size = SAFE_OFFSET(MINI_SIZE.X, MINI_SIZE.Y)}).Completed:Wait()
-			main.Position = topCenterPos(MINI_SIZE.X, 8) -- ✅ top center
+			main.Position = topCenterPos(MINI_SIZE.X, 8)
 		else
 			main.Size = savedSize
 			main.Position = savedPos
 			clampToScreen(FULL_SIZE, main)
-
 			safeTween(main, 0.22, {Size = SAFE_OFFSET(FULL_SIZE.X, FULL_SIZE.Y)}).Completed:Wait()
 			applyMinimizedVisuals(false)
 		end
@@ -930,7 +1061,7 @@ local function RUN_UI()
 		end)
 	end)
 
-	-- Dragging + clamp (full only; mini locked)
+	-- Dragging (full only)
 	do
 		local draggingWin = false
 		local startMouse, startPos
@@ -965,7 +1096,7 @@ local function RUN_UI()
 		end)
 	end
 
-	-- Intro (SAFE)
+	-- Intro
 	do
 		RunService.RenderStepped:Wait()
 		local vp = getViewport()
@@ -978,10 +1109,9 @@ local function RUN_UI()
 			clampToScreen(FULL_SIZE, main)
 		end)
 	end
-	--=============================================================================================
 end
+	--=============================================================================================
 
--- Delay start safely (important for obfuscators)
 task.defer(function()
 	local pg = WaitForPlayerGui()
 	WaitForCamera()
