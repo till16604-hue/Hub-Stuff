@@ -326,19 +326,33 @@ if pagesParent and not (pagesParent:IsA("Folder") or pagesParent:IsA("Frame")) t
 end
 pagesParent = pagesParent or content
 
+local mainPage = pagesParent:FindFirstChild("Main")
+if not (mainPage and mainPage:IsA("GuiObject")) then
+	mainPage = findDescendant(content, "Main")
+end
+
+local function isPage(obj)
+	return obj:IsA("Frame") or obj:IsA("ScrollingFrame")
+end
+
 local function getPages()
 	local pages = {}
 	for _, ch in ipairs(pagesParent:GetChildren()) do
-		if ch:IsA("Frame") then table.insert(pages, ch) end
+		if ch:IsA("GuiObject") and isPage(ch) then
+			table.insert(pages, ch)
+		end
 	end
 	return pages
 end
 
 local function showPage(target)
 	for _, p in ipairs(getPages()) do
-		p.Visible = (p == target)
+		if p and p:IsA("GuiObject") then
+			p.Visible = (p == target)
+		end
 	end
 end
+
 
 -- Find existing Main tab button (optional)
 local mainTabBtn
@@ -633,12 +647,17 @@ end)
 
 if mainTabBtn then
 	mainTabBtn.MouseButton1Click:Connect(function()
-		local pages = getPages()
-		if pages[1] then showPage(pages[1]) end
+		if mainPage and mainPage:IsA("GuiObject") then
+			showPage(mainPage)
+		else
+			local pages = getPages()
+			if pages[1] then showPage(pages[1]) end
+		end
 		setTabActive(mainTabBtn, true)
 		setTabActive(tabBtn, false)
 	end)
 end
+
 
 if mainTabBtn then setTabActive(mainTabBtn, true) end
 setTabActive(tabBtn, false)
