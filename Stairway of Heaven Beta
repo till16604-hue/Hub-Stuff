@@ -590,7 +590,7 @@ local function Enable()
 				local p = hrp2.Position
 				hrp2.CFrame = CFrame.new(p.X, p.Y + 36, p.Z)
 			end
-			task.wait(0.2)
+			task.wait(0.3)
 		end
 	end)
 	currentMaid:Give(th)
