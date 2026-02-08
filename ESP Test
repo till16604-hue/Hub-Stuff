@@ -1,0 +1,38 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+_G.ESPEnabled = true
+_G.TeamCheck = false
+_G.ESPColor = Color3.fromRGB(255, 0, 0)
+local function CreateESP(player)
+   local espBox = Drawing.new("Square")
+   espBox.Visible = false
+   espBox.Color = _G.ESPColor
+   espBox.Thickness = 2
+   espBox.Filled = false
+   RunService.RenderStepped:Connect(function()
+       if _G.ESPEnabled and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+           local rootPart = player.Character.HumanoidRootPart
+           local vector, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+           if onScreen then
+               espBox.Size = Vector2.new(50, 50)
+               espBox.Position = Vector2.new(vector.X - 25, vector.Y - 25)
+               espBox.Visible = true
+           else
+               espBox.Visible = false
+           end
+       else
+           espBox.Visible = false
+       end
+   end)
+end
+for _, player in pairs(Players:GetPlayers()) do
+   if player ~= Players.LocalPlayer then
+       CreateESP(player)
+   end
+end
+Players.PlayerAdded:Connect(function(player)
+   if player ~= Players.LocalPlayer then
+       CreateESP(player)
+   end
+end)
