@@ -1,0 +1,179 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/till16604-hue/Hub-Stuff/refs/heads/main/Raw%20GUI"))()
+
+do
+	local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
+	local UIS = game:GetService("UserInputService")
+
+	local lp = Players.LocalPlayer
+	local pg = lp:WaitForChild("PlayerGui")
+	local Camera = workspace.CurrentCamera
+
+	-- =========================
+	-- CONFIG
+	-- =========================
+	local TAB_NAME = "Aimbot"
+	
+	local state = {
+		Toggle1 = false,  
+		Toggle2 = false,  
+		Toggle3 = false,  
+		Slider1 = 75,   
+		Slider2 = 1.0,   
+	}
+
+	local fovCircle = Drawing.new("Circle")
+	fovCircle.Visible = false
+	fovCircle.Transparency = 1
+	fovCircle.Color = Color3.fromRGB(255, 0, 0)
+	fovCircle.Thickness = 1.5
+
+	-- =========================
+	-- AIMBOT CORE
+	-- =========================
+	local function isVisible(target)
+		if not state.Toggle2 then return true end
+		local char = target.Character
+		if not char or not char:FindFirstChild("Head") then return false end
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = {lp.Character, char, Camera}
+		local result = workspace:Raycast(Camera.CFrame.Position, (char.Head.Position - Camera.CFrame.Position), params)
+		return result == nil 
+	end
+
+	local function getTarget()
+		local closest = nil
+		local dist = math.huge
+		local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+		for _, p in pairs(Players:GetPlayers()) do
+			if p ~= lp and p.Character and p.Character:FindFirstChild("Head") then
+				local hum = p.Character:FindFirstChild("Humanoid")
+				if hum and hum.Health > 0 and (not state.Toggle3 or p.Team ~= lp.Team) then
+					if isVisible(p) then
+						local pos, onScreen = Camera:WorldToViewportPoint(p.Character.Head.Position)
+						if onScreen then
+							local mDist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+							if mDist < dist and mDist < state.Slider1 then
+								dist = mDist
+								closest = p
+							end
+						end
+					end
+				end
+			end
+		end
+		return closest
+	end
+
+	RunService:BindToRenderStep("HardLock", Enum.RenderPriority.Camera.Value + 1, function()
+		fovCircle.Visible = state.Toggle1
+		fovCircle.Position = Camera.ViewportSize / 2
+		fovCircle.Radius = state.Slider1
+
+		if state.Toggle1 then
+			local target = getTarget()
+			if target and target.Character and target.Character:FindFirstChild("Head") then
+				local head = target.Character.Head
+				local targetPos = head.Position + (head.AssemblyLinearVelocity * (1/60))
+				Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, targetPos)
+			end
+		end
+	end)
+
+	-- =========================
+	-- GUI TAB-FIX BINDING
+	-- =========================
+	local hub = pg:WaitForChild("N0BD.HUB", 15)
+	if not hub then return end
+
+	local main = hub:FindFirstChild("Main", true)
+	local sidebar = main:FindFirstChild("Sidebar", true)
+	local content = main:FindFirstChild("Content", true)
+	local pagesParent = content:FindFirstChild("Pages") or content
+	
+		local Theme = {
+			Panel   = Color3.fromRGB(11, 22, 48),
+			Card    = Color3.fromRGB(12, 26, 58),
+			Stroke  = Color3.fromRGB(40, 110, 255),
+			Text    = Color3.fromRGB(225, 238, 255),
+			SubText = Color3.fromRGB(150, 175, 210),
+			Accent  = Color3.fromRGB(0, 230, 255),
+			Active  = Color3.fromRGB(18, 44, 92),
+			Dark    = Color3.fromRGB(16, 26, 54),
+		}
+
+	if pagesParent:FindFirstChild(TAB_NAME) then pagesParent[TAB_NAME]:Destroy() end
+	local page = Instance.new("ScrollingFrame", pagesParent)
+	page.Name = TAB_NAME; page.BackgroundTransparency = 1; page.Size = UDim2.new(1, 0, 1, 0); page.CanvasSize = UDim2.new(0,0,0,0); page.Visible = false
+	
+	local stack = Instance.new("Frame", page)
+	stack.BackgroundTransparency = 1; stack.Size = UDim2.new(1, 0, 0, 0)
+	local list = Instance.new("UIListLayout", stack); list.Padding = UDim.new(0, 12)
+	list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		stack.Size = UDim2.new(1, 0, 0, list.AbsoluteContentSize.Y)
+		page.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 20)
+	end)
+
+	local function makeToggle(order, txt, hook, def)
+		local card = Instance.new("Frame", stack); card.BackgroundColor3 = Theme.Card; card.Size = UDim2.new(1, -10, 0, 75); card.LayoutOrder = order
+		Instance.new("UICorner", card).CornerRadius = UDim.new(0, 12)
+		local l = Instance.new("TextLabel", card); l.Text = txt; l.Size = UDim2.new(1, -120, 1, 0); l.Position = UDim2.new(0, 15, 0, 0); l.TextColor3 = Theme.Text; l.BackgroundTransparency = 1; l.TextXAlignment = 0; l.Font = "GothamBold"
+		local b = Instance.new("TextButton", card); b.Size = UDim2.new(0, 100, 0, 30); b.Position = UDim2.new(1, -15, 0.5, 0); b.AnchorPoint = Vector2.new(1, 0.5); b.BackgroundColor3 = Theme.Dark; b.Text = def and "ON" or "OFF"; b.TextColor3 = def and Theme.Accent or Theme.Text; Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+		local on = def
+		b.MouseButton1Click:Connect(function() on = not on; b.Text = on and "ON" or "OFF"; b.TextColor3 = on and Theme.Accent or Theme.Text; hook(on) end)
+	end
+
+	local function makeSlider(order, txt, min, max, def, hook, isFloat)
+		local card = Instance.new("Frame", stack); card.BackgroundColor3 = Theme.Card; card.Size = UDim2.new(1, -10, 0, 90); card.LayoutOrder = order
+		Instance.new("UICorner", card).CornerRadius = UDim.new(0, 12)
+		local l = Instance.new("TextLabel", card); l.Text = txt..": "..def; l.Size = UDim2.new(1, 0, 0, 35); l.Position = UDim2.new(0, 15, 0, 0); l.TextColor3 = Theme.SubText; l.BackgroundTransparency = 1; l.TextXAlignment = 0
+		local bar = Instance.new("Frame", card); bar.Size = UDim2.new(1, -30, 0, 6); bar.Position = UDim2.new(0, 15, 0, 55); bar.BackgroundColor3 = Theme.Dark; Instance.new("UICorner", bar)
+		local fill = Instance.new("Frame", bar); fill.Size = UDim2.new((def-min)/(max-min), 0, 1, 0); fill.BackgroundColor3 = Theme.Accent; Instance.new("UICorner", fill)
+		bar.InputBegan:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 then
+				local conn; conn = RunService.RenderStepped:Connect(function()
+					if not UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then conn:Disconnect() return end
+					local r = math.clamp((UIS:GetMouseLocation().X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+					local v = min + (r * (max - min))
+					fill.Size = UDim2.new(r, 0, 1, 0); l.Text = txt..": "..(isFloat and string.format("%.2f", v) or math.floor(v)); hook(v)
+				end)
+			end
+		end)
+	end
+
+	makeToggle(1, "Aimbot", function(v) state.Toggle1 = v end, false)
+	makeToggle(2, "Wall Check", function(v) state.Toggle2 = v end, false)
+	makeToggle(3, "Team Check", function(v) state.Toggle3 = v end, false)
+	makeSlider(4, "FOV Radius", 0, 500, 100, function(v) state.Slider1 = v end, false)
+	makeSlider(5, "Lock Intensity", 0.01, 1, 1.0, function(v) state.Slider2 = v end, true)
+
+	-- =========================
+	-- DYNAMISCHE TAB-STEUERUNG
+	-- =========================
+	local tabBtn = Instance.new("TextButton", sidebar)
+	tabBtn.Size = UDim2.new(1, 0, 0, 42); tabBtn.BackgroundColor3 = Theme.Card; tabBtn.Text = "    " .. TAB_NAME; tabBtn.TextColor3 = Theme.Text; tabBtn.TextXAlignment = 0; Instance.new("UICorner", tabBtn).CornerRadius = UDim.new(0, 12)
+	
+	tabBtn.MouseButton1Click:Connect(function()
+		for _, p in pairs(pagesParent:GetChildren()) do
+			if p:IsA("GuiObject") then p.Visible = false end
+		end
+		page.Visible = true
+	end)
+
+	for _, button in pairs(sidebar:GetChildren()) do
+		if button:IsA("TextButton") and button ~= tabBtn then
+			button.MouseButton1Click:Connect(function()
+				page.Visible = false
+				
+				
+				local targetName = button.Text:gsub("%s+", "") 
+				for _, p in pairs(pagesParent:GetChildren()) do
+					if p:IsA("GuiObject") and (string.find(targetName, p.Name) or string.find(p.Name, targetName)) then
+						p.Visible = true
+					end
+				end
+			end)
+		end
+	end
+end
