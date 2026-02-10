@@ -1,4 +1,4 @@
-loadstring(game:HttpGet("https://raw.githubusercontent.com/till16604-hue/Hub-Stuff/refs/heads/main/Aimbot%20Tab"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/till16604-hue/Hub-Stuff/refs/heads/main/4%20-%20Aimbot%20Tab"))()
 
 local ESP_SETTINGS = {
     Box = false,
