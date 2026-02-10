@@ -1,0 +1,111 @@
+--
+
+do
+	local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
+
+	local lp = Players.LocalPlayer
+	local pg = lp:WaitForChild("PlayerGui")
+
+	local function findDescendant(root, name)
+		for _, d in ipairs(root:GetDescendants()) do
+			if d.Name == name then return d end
+		end
+		return nil
+	end
+
+	local function waitHub(timeout)
+		local t0 = tick()
+		while tick() - t0 < (timeout or 10) do
+			local hub = pg:FindFirstChild("N0BD.HUB")
+			if hub and hub:IsA("ScreenGui") then return hub end
+			RunService.RenderStepped:Wait()
+		end
+		return nil
+	end
+
+	local hub = waitHub(10)
+	if not hub then return end
+
+	local main = hub:FindFirstChild("Main") or findDescendant(hub, "Main") or hub
+	local sidebar = findDescendant(main, "Sidebar")
+	if not sidebar then return end
+
+	-- Theme (best effort)
+	local topbar = findDescendant(main, "Topbar")
+	local glowLine = topbar and topbar:FindFirstChild("GlowLine")
+	local titleLbl = topbar and topbar:FindFirstChild("Title")
+
+	local Theme = {
+		Card   = Color3.fromRGB(12, 26, 58),
+		Active = Color3.fromRGB(18, 44, 92),
+		Text   = (titleLbl and titleLbl.TextColor3) or Color3.fromRGB(225, 238, 255),
+		Accent = (glowLine and glowLine.BackgroundColor3) or Color3.fromRGB(0, 230, 255),
+	}
+
+	local currentActiveBtn = nil
+
+	local function isSidebarTab(btn)
+		-- Only style your sidebar tab buttons
+		return btn:IsA("TextButton")
+	end
+
+	local function setActive(btn)
+		currentActiveBtn = btn
+
+		for _, ch in ipairs(sidebar:GetChildren()) do
+			if isSidebarTab(ch) then
+				local on = (ch == btn)
+				ch.BackgroundColor3 = on and Theme.Active or Theme.Card
+				ch.TextColor3 = on and Theme.Accent or Theme.Text
+			end
+		end
+	end
+
+	local function hookButton(btn)
+		if not isSidebarTab(btn) then return end
+
+		-- Prevent double-hooking
+		if btn:GetAttribute("__N0BD_ACTIVE_HOOKED") then return end
+		btn:SetAttribute("__N0BD_ACTIVE_HOOKED", true)
+
+		-- When user clicks a tab, it becomes the active one
+		btn.MouseButton1Click:Connect(function()
+			setActive(btn)
+		end)
+	end
+
+	-- Hook existing buttons
+	for _, ch in ipairs(sidebar:GetChildren()) do
+		hookButton(ch)
+	end
+
+	-- Hook future injected buttons too
+	sidebar.ChildAdded:Connect(function(ch)
+		task.defer(function()
+			hookButton(ch)
+		end)
+	end)
+
+	-- Pick a default active tab:
+	-- Prefer one that contains "main", otherwise first TextButton.
+	local defaultBtn = nil
+	for _, ch in ipairs(sidebar:GetChildren()) do
+		if isSidebarTab(ch) and tostring(ch.Text):lower():find("main") then
+			defaultBtn = ch
+			break
+		end
+	end
+	if not defaultBtn then
+		for _, ch in ipairs(sidebar:GetChildren()) do
+			if isSidebarTab(ch) then defaultBtn = ch break end
+		end
+	end
+
+	if defaultBtn then
+		setActive(defaultBtn)
+	end
+
+	-- Optional: expose function if you want to set active tab manually
+	getgenv().N0BD_SetActiveTabButton = setActive
+end
