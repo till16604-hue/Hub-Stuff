@@ -1,0 +1,178 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/till16604-hue/Hub-Stuff/refs/heads/main/Aimbot%20Tab"))()
+
+local ESP_SETTINGS = {
+    Box = false,
+    Tracer = false,
+    Skeleton = false,
+    Color = Color3.fromRGB(0, 230, 255)
+}
+
+local function CreateESP(player)
+    local box = Drawing.new("Square")
+    box.Thickness = 1; box.Filled = false; box.Visible = false; box.Color = ESP_SETTINGS.Color
+    local tracer = Drawing.new("Line")
+    tracer.Thickness = 1; tracer.Visible = false; tracer.Color = ESP_SETTINGS.Color
+    local skeletonLines = {}
+    for i = 1, 15 do
+        local l = Drawing.new("Line")
+        l.Thickness = 1; l.Visible = false; l.Color = ESP_SETTINGS.Color
+        table.insert(skeletonLines, l)
+    end
+
+    game:GetService("RunService").RenderStepped:Connect(function()
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") and player ~= game.Players.LocalPlayer then
+            local hrp = char.HumanoidRootPart
+            local pos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(hrp.Position)
+            if onScreen then
+                -- Box
+                if ESP_SETTINGS.Box then
+                    local sizeX, sizeY = 2000 / pos.Z, 3000 / pos.Z
+                    box.Size = Vector2.new(sizeX, sizeY); box.Position = Vector2.new(pos.X - sizeX/2, pos.Y - sizeY/2); box.Visible = true
+                else box.Visible = false end
+                -- Tracer
+                if ESP_SETTINGS.Tracer then
+                    tracer.From = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y)
+                    tracer.To = Vector2.new(pos.X, pos.Y); tracer.Visible = true
+                else tracer.Visible = false end
+                -- Skeleton
+                if ESP_SETTINGS.Skeleton then
+                    local joints = char:FindFirstChild("UpperTorso") and 
+                        {{"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"}, {"UpperTorso", "LeftUpperArm"}, {"UpperTorso", "RightUpperArm"}, {"LowerTorso", "LeftUpperLeg"}, {"LowerTorso", "RightUpperLeg"}} or 
+                        {{"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"}, {"Torso", "Left Leg"}, {"Torso", "Right Leg"}}
+                    for i, joint in pairs(joints) do
+                        local p1, p2 = char:FindFirstChild(joint[1]), char:FindFirstChild(joint[2])
+                        if p1 and p2 then
+                            local v1, o1 = workspace.CurrentCamera:WorldToViewportPoint(p1.Position)
+                            local v2, o2 = workspace.CurrentCamera:WorldToViewportPoint(p2.Position)
+                            if o1 and o2 then skeletonLines[i].Visible = true; skeletonLines[i].From = Vector2.new(v1.X, v1.Y); skeletonLines[i].To = Vector2.new(v2.X, v2.Y) end
+                        end
+                    end
+                else for _, l in pairs(skeletonLines) do l.Visible = false end end
+            else
+                box.Visible = false; tracer.Visible = false; for _, l in pairs(skeletonLines) do l.Visible = false end
+            end
+        else
+            box.Visible = false; tracer.Visible = false; for _, l in pairs(skeletonLines) do l.Visible = false end
+        end
+    end)
+end
+for _, p in pairs(game.Players:GetPlayers()) do CreateESP(p) end
+game.Players.PlayerAdded:Connect(CreateESP)
+
+-- 3. GUI INJECTOR (Tools Tab & Design Sync)
+do
+    local Players = game:GetService("Players")
+    local lp = Players.LocalPlayer
+    local pg = lp:WaitForChild("PlayerGui")
+
+    local function findDescendant(root, name)
+        for _, d in ipairs(root:GetDescendants()) do if d.Name == name then return d end end
+        return nil
+    end
+
+    local hub = pg:WaitForChild("N0BD.HUB", 20)
+    local main = hub:WaitForChild("Main", 10)
+    local sidebar = findDescendant(main, "Sidebar")
+    local content = findDescendant(main, "Content")
+    local pagesParent = content:FindFirstChild("Pages") or content
+
+    local Theme = {
+        Card   = Color3.fromRGB(12, 26, 58),
+        Stroke = Color3.fromRGB(40, 110, 255),
+        Text   = Color3.fromRGB(225, 238, 255),
+        Sub    = Color3.fromRGB(150, 175, 210),
+        Accent = Color3.fromRGB(0, 230, 255),
+        Active = Color3.fromRGB(18, 44, 92),
+        Dark   = Color3.fromRGB(16, 26, 54),
+    }
+
+    -- Hilfsfunktionen für Design
+    local function applyStyle(inst, r)
+        local c = inst:FindFirstChildOfClass("UICorner") or Instance.new("UICorner", inst)
+        c.CornerRadius = UDim.new(0, r or 12)
+        local s = inst:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke", inst)
+        s.Color = Theme.Stroke; s.Transparency = 0.85; s.Thickness = 1; s.ApplyStrokeMode = "Border"
+    end
+
+    -- Tools Page
+    local page = Instance.new("ScrollingFrame", pagesParent)
+    page.Name = "Tools"; page.Size = UDim2.new(1, 0, 1, 0); page.BackgroundTransparency = 1; page.Visible = false; page.ScrollBarThickness = 0
+    local list = Instance.new("UIListLayout", page)
+    list.Padding = UDim.new(0, 12); list.HorizontalAlignment = "Center"
+
+    -- Sidebar-Buttons angleichen und Click-Fix hinzufügen
+    local function syncSidebarButtons()
+        for _, btn in pairs(sidebar:GetChildren()) do
+            if btn:IsA("TextButton") then
+                btn.Size = UDim2.new(1, -14, 0, 42)
+                btn.BackgroundColor3 = (btn.Name == "Tab_Tools" and page.Visible) and Theme.Active or Theme.Card
+                btn.Font = Enum.Font.GothamSemibold
+                btn.TextSize = 14
+                btn.TextXAlignment = Enum.TextXAlignment.Left
+                if not btn.Text:find("      ") then btn.Text = "      " .. btn.Text:gsub("%s+", "") end
+                applyStyle(btn, 12)
+
+                -- FIX: Wenn ein anderer Tab (Main/Aimbot) geklickt wird, schließe die Tools-Page
+                if btn.Name ~= "Tab_Tools" then
+                    btn.MouseButton1Click:Connect(function()
+                        page.Visible = false
+                    end)
+                end
+            end
+        end
+    end
+
+    local function makeToggleCard(order, titleText, key)
+        local card = Instance.new("Frame", page)
+        card.BackgroundColor3 = Theme.Card; card.Size = UDim2.new(1, -24, 0, 85); card.LayoutOrder = order
+        applyStyle(card, 14)
+
+        local title = Instance.new("TextLabel", card)
+        title.Position = UDim2.new(0, 16, 0, 20); title.Size = UDim2.new(0, 200, 0, 20); title.BackgroundTransparency = 1; title.Font = "GothamSemibold"; title.TextSize = 14; title.TextColor3 = Theme.Text; title.Text = titleText; title.TextXAlignment = "Left"
+        
+        local status = Instance.new("TextLabel", card)
+        status.Position = UDim2.new(0, 16, 0, 40); status.Size = UDim2.new(0, 200, 0, 20); status.BackgroundTransparency = 1; status.Font = "Gotham"; status.TextSize = 11; status.TextColor3 = Theme.Sub; status.Text = "Status: OFF"; status.TextXAlignment = "Left"
+
+        local btn = Instance.new("TextButton", card)
+        btn.Position = UDim2.new(1, -125, 0.5, -17); btn.Size = UDim2.new(0, 110, 0, 34); btn.BackgroundColor3 = Theme.Dark; btn.Font = "GothamBold"; btn.TextSize = 12; btn.TextColor3 = Theme.Text; btn.Text = "OFF"
+        applyStyle(btn, 10)
+
+        btn.MouseButton1Click:Connect(function()
+            ESP_SETTINGS[key] = not ESP_SETTINGS[key]
+            local on = ESP_SETTINGS[key]
+            btn.Text = on and "ON" or "OFF"
+            status.Text = on and "Status: ON" or "Status: OFF"
+            btn.TextColor3 = on and Theme.Accent or Theme.Text
+        end)
+    end
+
+    makeToggleCard(1, "ESP Box", "Box")
+    makeToggleCard(2, "ESP Tracer", "Tracer")
+    makeToggleCard(3, "ESP Skeleton", "Skeleton")
+
+    -- Tools Sidebar Button
+    local tabBtn = Instance.new("TextButton", sidebar)
+    tabBtn.Name = "Tab_Tools"; tabBtn.Text = "Tools"; tabBtn.LayoutOrder = 3
+    
+    -- Sync Loop (Damit das Design bleibt, auch wenn Aimbot Tab lädt)
+    task.spawn(function()
+        while true do
+            syncSidebarButtons()
+            task.wait(0.5)
+        end
+    end)
+
+    tabBtn.MouseButton1Click:Connect(function()
+        -- Verstecke alle anderen Seiten
+        for _, p in pairs(pagesParent:GetChildren()) do 
+            if p:IsA("GuiObject") then p.Visible = false end 
+        end
+        -- Zeige Tools Seite
+        page.Visible = true
+        for _, b in pairs(sidebar:GetChildren()) do 
+            if b:IsA("TextButton") then b.BackgroundColor3 = Theme.Card; b.TextColor3 = Theme.Text end 
+        end
+        tabBtn.BackgroundColor3 = Theme.Active; tabBtn.TextColor3 = Theme.Accent
+    end)
+end
