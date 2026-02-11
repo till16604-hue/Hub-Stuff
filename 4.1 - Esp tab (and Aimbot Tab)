@@ -1,11 +1,12 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/till16604-hue/Hub-Stuff/refs/heads/main/4%20-%20Aimbot%20Tab"))()
 
-local ESP_SETTINGS = {
-    Box = false,
-    Tracer = false,
-    Skeleton = false,
-    Color = Color3.fromRGB(0, 230, 255)
-}
+do
+    local ESP_SETTINGS = {
+        Box = false,
+        Tracer = false,
+        Skeleton = false,
+        Color = Color3.fromRGB(0, 230, 255)
+    }
 
 local function CreateESP(player)
     local box = Drawing.new("Square")
@@ -161,7 +162,7 @@ do
     makeToggleCard(3, "ESP Skeleton", "Skeleton")
 
     local tabBtn = Instance.new("TextButton", sidebar)
-    tabBtn.Name = "Tab_Tools"; tabBtn.Text = "Tools"; tabBtn.LayoutOrder = 3
+    tabBtn.Name = "Tab_Tools"; tabBtn.Text = "ESP"; tabBtn.LayoutOrder = 3
     
     task.spawn(function()
         while true do
