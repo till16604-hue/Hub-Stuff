@@ -108,7 +108,7 @@ do
     end
 
     local page = Instance.new("ScrollingFrame", pagesParent)
-    page.Name = "Tools"; page.Size = UDim2.new(1, 0, 1, 0); page.BackgroundTransparency = 1; page.Visible = false; page.ScrollBarThickness = 0
+    page.Name = "ESP"; page.Size = UDim2.new(1, 0, 1, 0); page.BackgroundTransparency = 1; page.Visible = false; page.ScrollBarThickness = 0
     local list = Instance.new("UIListLayout", page)
     list.Padding = UDim.new(0, 12); list.HorizontalAlignment = "Center"
 
