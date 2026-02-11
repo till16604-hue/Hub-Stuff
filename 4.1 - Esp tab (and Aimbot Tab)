@@ -162,7 +162,7 @@ do
     makeToggleCard(3, "ESP Skeleton", "Skeleton")
 
     local tabBtn = Instance.new("TextButton", sidebar)
-    tabBtn.Name = "Tab_Tools"; tabBtn.Text = "ESP"; tabBtn.LayoutOrder = 3
+    tabBtn.Name = "Tab_Tools"; tabBtn.Text = "Tools"; tabBtn.LayoutOrder = 3
     
     task.spawn(function()
         while true do
