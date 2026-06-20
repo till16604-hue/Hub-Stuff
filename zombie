@@ -1,0 +1,1927 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/N0BD/n0bd/refs/heads/n0bd.hub/n0bd.gui"))()
+
+--═════════════════════════════════════════════════════════
+-- SERVICES
+-- ═══════════════════════════════════════════════════════════
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+local TweenService      = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting          = game:GetService("Lighting")
+local VirtualUser       = game:GetService("VirtualUser")
+local HttpService       = game:GetService("HttpService")
+
+-- ═══════════════════════════════════════════════════════════
+-- PLACE CHECK
+-- ═══════════════════════════════════════════════════════════
+local IS_MAIN  = (game.PlaceId == 114204398207377)
+local IS_ARENA = (game.PlaceId == 98927955463992)
+
+if not IS_MAIN and not IS_ARENA then
+    warn("N0BD.HUB Survival Zombie: Wrong Place ID.")
+    return
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- WAIT FOR N0BD_UI
+-- ═══════════════════════════════════════════════════════════
+local UI
+do
+    local waited = 0
+    while not getgenv().N0BD_UI do
+        task.wait(0.1)
+        waited = waited + 0.1
+        if waited > 15 then
+            warn("[ZombieScript] N0BD_UI not found after 15s. Aborting.")
+            return
+        end
+    end
+    UI = getgenv().N0BD_UI
+end
+
+local Toast = UI.Toast
+
+-- ═══════════════════════════════════════════════════════════
+-- CONFIG PATH
+-- ═══════════════════════════════════════════════════════════
+local CONFIG_FOLDER = "N0BD.HUB"
+local CONFIG_NAME   = "N0BD_SurvivalZombieConfig.json"
+
+if not isfolder(CONFIG_FOLDER) then
+    makefolder(CONFIG_FOLDER)
+end
+
+local CONFIG_FILE = CONFIG_FOLDER .. "/" .. CONFIG_NAME
+
+-- ═══════════════════════════════════════════════════════════
+-- CONFIG SYSTEM
+-- ═══════════════════════════════════════════════════════════
+local ConfigRegistry = {}
+
+local function registerConfigToggle(id, getterFn, setterFn)
+    ConfigRegistry[id] = { type = "toggle", get = getterFn, set = setterFn }
+end
+
+local function registerConfigSlider(id, getterFn, setterFn)
+    ConfigRegistry[id] = { type = "slider", get = getterFn, set = setterFn }
+end
+
+local function saveConfig()
+    if not (writefile and HttpService) then
+        Toast("writefile not available!")
+        return false
+    end
+    local data = {}
+    for id, entry in pairs(ConfigRegistry) do
+        data[id] = entry.get()
+    end
+    local ok, err = pcall(function()
+        writefile(CONFIG_FILE, HttpService:JSONEncode(data))
+    end)
+    if ok then
+        Toast("Config saved!")
+        return true
+    else
+        Toast("Save failed: " .. tostring(err))
+        return false
+    end
+end
+
+local function loadConfig(silent)
+    if not (readfile and isfile and HttpService) then
+        if not silent then Toast("readfile not available!") end
+        return false
+    end
+    local ok, data = pcall(function()
+        if not isfile(CONFIG_FILE) then error("no file") end
+        return HttpService:JSONDecode(readfile(CONFIG_FILE))
+    end)
+    if not ok or type(data) ~= "table" then
+        if not silent then Toast("No config found or parse error!") end
+        return false
+    end
+    for id, value in pairs(data) do
+        local entry = ConfigRegistry[id]
+        if entry then
+            pcall(function() entry.set(value) end)
+        end
+    end
+    if not silent then Toast("Config loaded!") end
+    return true
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- CORE HELPERS
+-- ═══════════════════════════════════════════════════════════
+local LP = Players.LocalPlayer
+local GlobalConnections = {}
+
+local function getHRP()
+    local c = LP.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function getHum()
+    local c = LP.Character
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- ZOMBIE TABLE
+-- ═══════════════════════════════════════════════════════════
+local ZombieTable = nil
+
+local function findZombieTable()
+    pcall(function()
+        local scripts = LP:FindFirstChild("PlayerScripts")
+        if scripts then
+            local ctrl = scripts:FindFirstChild("Controllers", true)
+                or scripts:FindFirstChild("ZombieClient", true)
+            if ctrl then
+                local ok, mod = pcall(require, ctrl)
+                if ok and mod and type(mod.Zombies) == "table" then
+                    ZombieTable = mod.Zombies
+                end
+            end
+        end
+    end)
+    if not ZombieTable then
+        pcall(function()
+            for _, v in pairs(getgc(true)) do
+                if type(v) == "table"
+                    and rawget(v, "Zombies")
+                    and rawget(v, "ZombieModels")
+                    and type(rawget(v, "Zombies")) == "table"
+                then
+                    ZombieTable = v.Zombies
+                    break
+                end
+            end
+        end)
+    end
+    return ZombieTable
+end
+
+task.spawn(function()
+    task.wait(1)
+    findZombieTable()
+    if not ZombieTable then
+        task.wait(2)
+        findZombieTable()
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- DAMAGE REMOTE
+-- ═══════════════════════════════════════════════════════════
+local _dmgRemote = nil
+local function getDmgRemote()
+    if _dmgRemote then return _dmgRemote end
+    local r = ReplicatedStorage:FindFirstChild("ZombieRemotes")
+    if r then _dmgRemote = r:FindFirstChild("ZombieDamage") end
+    return _dmgRemote
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- KILL ENGINE
+-- ═══════════════════════════════════════════════════════════
+local Kill = {
+    autoEnabled = false,
+    loopThread  = nil,
+    killed      = 0,
+    countLabel  = nil,
+}
+local Kill_lastAlive = {}
+
+local function killAllZombies()
+    local remote = getDmgRemote()
+    if not remote then return 0 end
+    if not ZombieTable then findZombieTable() end
+    local currentAlive = {}
+    local fired = 0
+    if ZombieTable then
+        for id, data in pairs(ZombieTable) do
+            if data and not data.IsDying and (data.Health or 0) > 0 then
+                currentAlive[id] = true
+                for i = 1, 3 do
+                    pcall(function() remote:FireServer(id, math.huge) end)
+                end
+                fired = fired + 1
+            end
+        end
+    end
+    if fired == 0 then
+        local folders = {
+            workspace:FindFirstChild("Zombies_Local"),
+            workspace:FindFirstChild("FriendlyZombies"),
+        }
+        for _, folder in ipairs(folders) do
+            if folder then
+                for _, child in ipairs(folder:GetChildren()) do
+                    local id = tonumber(child.Name:match("^Zombie_(%d+)$"))
+                    if id then
+                        currentAlive[id] = true
+                        for i = 1, 3 do
+                            pcall(function() remote:FireServer(id, math.huge) end)
+                        end
+                        local hum = child:FindFirstChildOfClass("Humanoid")
+                        if hum then pcall(function() hum.Health = 0 end) end
+                        fired = fired + 1
+                    end
+                end
+            end
+        end
+    end
+    local deaths = 0
+    for id in pairs(Kill_lastAlive) do
+        if not currentAlive[id] then deaths = deaths + 1 end
+    end
+    Kill_lastAlive = currentAlive
+    return deaths
+end
+
+local function killOnce()
+    local remote = getDmgRemote()
+    if not remote then Toast("No ZombieDamage remote found!") return end
+    if not ZombieTable then findZombieTable() end
+    local n = 0
+    if ZombieTable then
+        for id, data in pairs(ZombieTable) do
+            if data and not data.IsDying and (data.Health or 0) > 0 then
+                pcall(function() remote:FireServer(id, math.huge) end)
+                n = n + 1
+            end
+        end
+    end
+    Toast("Kill All fired at " .. n .. " zombies")
+end
+
+local function startAutoKill()
+    Kill.autoEnabled = true
+    Kill_lastAlive   = {}
+    Toast("Auto-Kill ENABLED")
+    Kill.loopThread = task.spawn(function()
+        while Kill.autoEnabled do
+            local deaths = killAllZombies()
+            Kill.killed  = Kill.killed + deaths
+            if Kill.countLabel then
+                Kill.countLabel.SetValue(Kill.killed .. " killed")
+            end
+            task.wait(0.2)
+        end
+    end)
+end
+
+local function stopAutoKill()
+    Kill.autoEnabled = false
+    Kill.loopThread  = nil
+    Kill_lastAlive   = {}
+    Toast("Auto-Kill DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- FLY
+-- ═══════════════════════════════════════════════════════════
+local Fly = { enabled = false, speed = 60, bv = nil, bg = nil, conn = nil }
+
+local function flyEnable()
+    local hrp = getHRP(); local hum = getHum()
+    if not hrp or not hum then Toast("No character!") return end
+    hum.PlatformStand = true
+    local bv = Instance.new("BodyVelocity")
+    bv.Name = "_FlyBV"; bv.Velocity = Vector3.zero
+    bv.MaxForce = Vector3.new(1e6,1e6,1e6); bv.P = 1e4; bv.Parent = hrp
+    Fly.bv = bv
+    local bg = Instance.new("BodyGyro")
+    bg.Name = "_FlyBG"; bg.MaxTorque = Vector3.new(1e6,1e6,1e6)
+    bg.P = 1e4; bg.D = 100; bg.CFrame = hrp.CFrame; bg.Parent = hrp
+    Fly.bg = bg
+    Fly.conn = RunService.RenderStepped:Connect(function()
+        local h2 = getHRP(); if not h2 then return end
+        local cam = workspace.CurrentCamera; if not cam then return end
+        local dir = Vector3.zero; local spd = Fly.speed
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then spd = spd * 2.5 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.E) or
+           UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Q) then dir = dir - Vector3.new(0,1,0) end
+        if dir.Magnitude > 0 then dir = dir.Unit end
+        if Fly.bv and Fly.bv.Parent then Fly.bv.Velocity = dir * spd end
+        if Fly.bg and Fly.bg.Parent then Fly.bg.CFrame = cam.CFrame end
+    end)
+    Fly.enabled = true
+    Toast("Fly ENABLED")
+end
+
+local function flyDisable()
+    local hum = getHum(); if hum then hum.PlatformStand = false end
+    if Fly.bv and Fly.bv.Parent then Fly.bv:Destroy() end
+    if Fly.bg and Fly.bg.Parent then Fly.bg:Destroy() end
+    if Fly.conn then Fly.conn:Disconnect(); Fly.conn = nil end
+    Fly.bv = nil; Fly.bg = nil; Fly.enabled = false
+    Toast("Fly DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- SAFE ZONE
+-- ═══════════════════════════════════════════════════════════
+local SafeZone = { enabled = false, HEIGHT = 25, lockedY = 0, conn = nil }
+
+local function safezoneEnable()
+    local hrp = getHRP(); if not hrp then Toast("No character!") return end
+    SafeZone.lockedY = hrp.Position.Y + SafeZone.HEIGHT
+    local bp = hrp:FindFirstChild("SafeZoneBP")
+    if not bp then
+        bp = Instance.new("BodyPosition")
+        bp.Name = "SafeZoneBP"; bp.MaxForce = Vector3.new(0, math.huge, 0)
+        bp.D = 100; bp.P = 10000; bp.Parent = hrp
+    end
+    bp.Position = Vector3.new(0, SafeZone.lockedY, 0)
+    SafeZone.conn = RunService.Heartbeat:Connect(function()
+        local h2 = getHRP()
+        if h2 and not h2:FindFirstChild("SafeZoneBP") then
+            local nbp = Instance.new("BodyPosition")
+            nbp.Name = "SafeZoneBP"; nbp.MaxForce = Vector3.new(0, math.huge, 0)
+            nbp.Position = Vector3.new(0, SafeZone.lockedY, 0); nbp.Parent = h2
+        end
+    end)
+    SafeZone.enabled = true
+    Toast("Safe Zone ENABLED")
+end
+
+local function safezoneDisable()
+    if SafeZone.conn then SafeZone.conn:Disconnect(); SafeZone.conn = nil end
+    local hrp = getHRP()
+    if hrp then
+        local bp = hrp:FindFirstChild("SafeZoneBP")
+        if bp then bp:Destroy() end
+    end
+    SafeZone.enabled = false
+    Toast("Safe Zone DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- NOCLIP
+-- ═══════════════════════════════════════════════════════════
+local Noclip = { enabled = false, conn = nil }
+
+local function noclipEnable()
+    Noclip.conn = RunService.Stepped:Connect(function()
+        local c = LP.Character; if not c then return end
+        for _, p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = false end
+        end
+    end)
+    Noclip.enabled = true
+    Toast("Noclip ENABLED")
+end
+
+local function noclipDisable()
+    if Noclip.conn then Noclip.conn:Disconnect(); Noclip.conn = nil end
+    local c = LP.Character
+    if c then
+        for _, p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = true end
+        end
+    end
+    Noclip.enabled = false
+    Toast("Noclip DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- GOD MODE
+-- ═══════════════════════════════════════════════════════════
+local GodMode = { enabled = false, conn = nil }
+
+local function godEnable()
+    GodMode.conn = RunService.RenderStepped:Connect(function()
+        local hum = getHum(); if not hum then return end
+        pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false) end)
+        if hum.Health < hum.MaxHealth then hum.Health = hum.MaxHealth end
+    end)
+    GodMode.enabled = true
+    Toast("God Mode ENABLED")
+end
+
+local function godDisable()
+    if GodMode.conn then GodMode.conn:Disconnect(); GodMode.conn = nil end
+    local hum = getHum()
+    if hum then
+        pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, true) end)
+    end
+    GodMode.enabled = false
+    Toast("God Mode DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- INFINITE JUMP
+-- ═══════════════════════════════════════════════════════════
+local InfJump = { enabled = false, conn = nil }
+
+local function infJumpEnable()
+    InfJump.conn = UserInputService.JumpRequest:Connect(function()
+        local hum = getHum()
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end)
+    InfJump.enabled = true
+    Toast("Infinite Jump ENABLED")
+end
+
+local function infJumpDisable()
+    if InfJump.conn then InfJump.conn:Disconnect(); InfJump.conn = nil end
+    InfJump.enabled = false
+    Toast("Infinite Jump DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- SPEED HACK
+-- ═══════════════════════════════════════════════════════════
+local SpeedHack = { enabled = false, speed = 100, origSpeed = 16, conn = nil }
+
+local function speedEnable()
+    local hum = getHum(); if not hum then return end
+    SpeedHack.origSpeed = hum.WalkSpeed
+    hum.WalkSpeed = SpeedHack.speed
+    SpeedHack.conn = RunService.Heartbeat:Connect(function()
+        local hm = getHum()
+        if hm and hm.WalkSpeed ~= SpeedHack.speed then
+            hm.WalkSpeed = SpeedHack.speed
+        end
+    end)
+    SpeedHack.enabled = true
+    Toast("Speed Hack ENABLED: " .. SpeedHack.speed)
+end
+
+local function speedDisable()
+    if SpeedHack.conn then SpeedHack.conn:Disconnect(); SpeedHack.conn = nil end
+    local hum = getHum()
+    if hum then hum.WalkSpeed = SpeedHack.origSpeed end
+    SpeedHack.enabled = false
+    Toast("Speed Hack DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- ANTI-LAG
+-- ═══════════════════════════════════════════════════════════
+local AntiLag = { enabled = false, origShadows = true, origFogEnd = 9e8 }
+
+local function antiLagEnable()
+    AntiLag.enabled     = true
+    AntiLag.origShadows = Lighting.GlobalShadows
+    AntiLag.origFogEnd  = Lighting.FogEnd
+    pcall(function() Lighting.GlobalShadows = false end)
+    pcall(function() Lighting.FogEnd = 9e8 end)
+    pcall(function()
+        for _, p in ipairs(workspace:GetDescendants()) do
+            if p:IsA("ParticleEmitter") or p:IsA("Trail") or p:IsA("Beam") then
+                p.Enabled = false
+            end
+        end
+    end)
+    pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+    Toast("Anti-Lag ENABLED")
+end
+
+local function antiLagDisable()
+    AntiLag.enabled = false
+    pcall(function() Lighting.GlobalShadows = AntiLag.origShadows end)
+    pcall(function() Lighting.FogEnd = AntiLag.origFogEnd end)
+    pcall(function()
+        for _, p in ipairs(workspace:GetDescendants()) do
+            if p:IsA("ParticleEmitter") or p:IsA("Trail") or p:IsA("Beam") then
+                p.Enabled = true
+            end
+        end
+    end)
+    pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
+    Toast("Anti-Lag DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- GALACTIC SPIN
+-- ═══════════════════════════════════════════════════════════
+local GalacticSpin = {
+    autoEnabled = false,
+    spinCount   = 0,
+    loopThread  = nil,
+    countLabel  = nil,
+}
+
+local function getSpinRemote()
+    local er = ReplicatedStorage:FindFirstChild("EventRemotes")
+    return er and er:FindFirstChild("GalacticRequestSpin")
+end
+
+local function doSpin()
+    if not IS_MAIN then Toast("Only in Main Game!") return end
+    local remote = getSpinRemote()
+    if not remote then Toast("GalacticRequestSpin not found!") return end
+    pcall(function() remote:InvokeServer() end)
+    GalacticSpin.spinCount = GalacticSpin.spinCount + 1
+    if GalacticSpin.countLabel then
+        GalacticSpin.countLabel.SetValue(GalacticSpin.spinCount .. " spins")
+    end
+    Toast("Spin #" .. GalacticSpin.spinCount)
+end
+
+local function startAutoSpin()
+    if not IS_MAIN then Toast("Only in Main Game!") return end
+    GalacticSpin.autoEnabled = true
+    Toast("Auto-Spin ENABLED")
+    GalacticSpin.loopThread = task.spawn(function()
+        while GalacticSpin.autoEnabled do
+            doSpin()
+            task.wait(3)
+        end
+    end)
+end
+
+local function stopAutoSpin()
+    GalacticSpin.autoEnabled = false
+    GalacticSpin.loopThread  = nil
+    Toast("Auto-Spin DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- VOID SHARD MAGNET
+-- ═══════════════════════════════════════════════════════════
+local VoidMagnet = {
+    enabled     = false,
+    collected   = 0,
+    folderConns = {},
+    countLabel  = nil,
+}
+local VoidMagnet_seen = {}
+
+local function tryCollectShard(obj)
+    if not obj or not obj.Parent then return end
+    if VoidMagnet_seen[obj] then return end
+    VoidMagnet_seen[obj] = true
+    local hrp = getHRP()
+    if not hrp then VoidMagnet_seen[obj] = nil return end
+    local part = nil
+    if obj:IsA("BasePart") then
+        part = obj
+    elseif obj:IsA("Model") then
+        pcall(function() part = obj:WaitForChild("VoidShardPart", 3) end)
+        if not part then part = obj:FindFirstChildWhichIsA("BasePart") end
+    end
+    if not part then part = obj:FindFirstChild("VoidShardPart", true) end
+    if not part or not part.Parent then return end
+    local allParts = {}
+    if obj:IsA("Model") then
+        for _, child in ipairs(obj:GetDescendants()) do
+            if child:IsA("BasePart") then table.insert(allParts, child) end
+        end
+    end
+    if #allParts == 0 then table.insert(allParts, part) end
+    local container = obj:IsA("Model") and obj
+        or (obj.Parent and obj.Parent:IsA("Model") and obj.Parent) or nil
+    local collectRemote = nil
+    local remoteNames = {
+        "CollectVoidShard","VoidShardCollect","CollectShard",
+        "VoidCollect","ShardCollect","PickupShard","Collect",
+    }
+    for _, name in ipairs(remoteNames) do
+        local rem = ReplicatedStorage:FindFirstChild(name, true)
+        if rem and rem:IsA("RemoteEvent") then collectRemote = rem; break end
+    end
+    for attempt = 1, 15 do
+        if not obj.Parent then break end
+        local hrp2 = getHRP(); if not hrp2 then break end
+        local targetCF = CFrame.new(hrp2.Position + Vector3.new(0, 3, 0))
+        for _, p in ipairs(allParts) do pcall(function() p.CFrame = targetCF end) end
+        task.wait(0.03)
+        for _, p in ipairs(allParts) do
+            if p.Parent then
+                pcall(function() firetouchinterest(hrp2, p, 0) end)
+                pcall(function() firetouchinterest(hrp2, p, 1) end)
+            end
+        end
+        if container then
+            for _, child in ipairs(container:GetDescendants()) do
+                if child:IsA("ProximityPrompt") then
+                    pcall(function() fireproximityprompt(child) end)
+                end
+            end
+        end
+        if collectRemote then pcall(function() collectRemote:FireServer() end) end
+        task.wait(0.15)
+        if not obj.Parent then break end
+    end
+    if not obj.Parent then
+        VoidMagnet.collected = VoidMagnet.collected + 1
+        if VoidMagnet.countLabel then
+            VoidMagnet.countLabel.SetValue(VoidMagnet.collected .. " collected")
+        end
+        Toast("Void Shard #" .. VoidMagnet.collected .. " collected!")
+    else
+        VoidMagnet_seen[obj] = nil
+    end
+end
+
+local VoidMagnet_pollFrame = 0
+
+local function watchShardFolder(folder)
+    if not folder then return end
+    for _, child in ipairs(folder:GetChildren()) do
+        if VoidMagnet.enabled then
+            task.spawn(function() tryCollectShard(child) end)
+        end
+    end
+    local connAdd = folder.ChildAdded:Connect(function(child)
+        if not VoidMagnet.enabled then return end
+        if VoidMagnet_seen[child] then return end
+        task.wait(0.15)
+        task.spawn(function() tryCollectShard(child) end)
+    end)
+    table.insert(VoidMagnet.folderConns, connAdd)
+    local connRem = folder.ChildRemoved:Connect(function(child)
+        VoidMagnet_seen[child] = nil
+    end)
+    table.insert(VoidMagnet.folderConns, connRem)
+    local connPoll = RunService.Heartbeat:Connect(function()
+        if not VoidMagnet.enabled then return end
+        VoidMagnet_pollFrame = VoidMagnet_pollFrame + 1
+        if VoidMagnet_pollFrame % 30 ~= 0 then return end
+        if not folder.Parent then return end
+        for _, child in ipairs(folder:GetChildren()) do
+            if not VoidMagnet_seen[child] then
+                task.spawn(function() tryCollectShard(child) end)
+            end
+        end
+    end)
+    table.insert(VoidMagnet.folderConns, connPoll)
+end
+
+local function enableVoidMagnet()
+    if not IS_MAIN then Toast("Only in Main Game!") return end
+    VoidMagnet.enabled = true
+    Toast("Void Magnet ENABLED")
+    watchShardFolder(workspace:FindFirstChild("VoidShards"))
+    local c = workspace.ChildAdded:Connect(function(child)
+        if child.Name == "VoidShards" and VoidMagnet.enabled then
+            task.wait(0.1)
+            watchShardFolder(child)
+        end
+    end)
+    table.insert(VoidMagnet.folderConns, c)
+end
+
+local function disableVoidMagnet()
+    VoidMagnet.enabled = false
+    for _, c in ipairs(VoidMagnet.folderConns) do
+        pcall(function() c:Disconnect() end)
+    end
+    VoidMagnet.folderConns = {}
+    Toast("Void Magnet DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- ZOMBIE ESP
+-- ═══════════════════════════════════════════════════════════
+local ESP = { enabled = false, frameCount = 0, UPDATE_EVERY = 15 }
+local ESPRegistry = {}
+
+local function createESPFor(id, model, humanoid)
+    if ESPRegistry[id] then return end
+    local hrp = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+    if not hrp then return end
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "_ESP"; bb.Size = UDim2.fromOffset(110, 48)
+    bb.StudsOffset = Vector3.new(0, 3.5, 0); bb.AlwaysOnTop = true
+    bb.LightInfluence = 0; bb.MaxDistance = 500; bb.Parent = hrp
+    local bg = Instance.new("Frame", bb)
+    bg.Size = UDim2.new(1,0,1,0); bg.BackgroundColor3 = Color3.new(0,0,0)
+    bg.BackgroundTransparency = 0.5; bg.BorderSizePixel = 0
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 5)
+    local nl = Instance.new("TextLabel", bg)
+    nl.Size = UDim2.new(1,0,0,18); nl.Position = UDim2.fromOffset(0,2)
+    nl.BackgroundTransparency = 1; nl.Text = "#" .. id
+    nl.TextSize = 10; nl.Font = Enum.Font.GothamBold
+    nl.TextColor3 = Color3.fromRGB(255,80,80)
+    local dl = Instance.new("TextLabel", bg)
+    dl.Name = "Dist"; dl.Size = UDim2.new(1,0,0,14)
+    dl.Position = UDim2.fromOffset(0,20)
+    dl.BackgroundTransparency = 1; dl.Text = "?"
+    dl.TextSize = 9; dl.Font = Enum.Font.Gotham
+    dl.TextColor3 = Color3.fromRGB(200,200,200)
+    local hpBg = Instance.new("Frame", bg)
+    hpBg.Size = UDim2.new(1,-6,0,5); hpBg.Position = UDim2.new(0,3,0,37)
+    hpBg.BackgroundColor3 = Color3.fromRGB(40,40,40); hpBg.BorderSizePixel = 0
+    Instance.new("UICorner", hpBg).CornerRadius = UDim.new(1,0)
+    local hpFill = Instance.new("Frame", hpBg)
+    hpFill.Name = "HpFill"; hpFill.Size = UDim2.new(1,0,1,0)
+    hpFill.BackgroundColor3 = Color3.fromRGB(60,220,80); hpFill.BorderSizePixel = 0
+    Instance.new("UICorner", hpFill).CornerRadius = UDim.new(1,0)
+    local box = Instance.new("SelectionBox")
+    box.Name = "_ESPBox"; box.Color3 = Color3.fromRGB(255,50,50)
+    box.LineThickness = 0.06; box.SurfaceTransparency = 0.88
+    box.SurfaceColor3 = Color3.fromRGB(255,50,50)
+    box.Adornee = model; box.Parent = workspace
+    ESPRegistry[id] = {
+        esp      = bb, box = box, distLbl = dl,
+        hpFill   = hpFill, hrp = hrp, humanoid = humanoid
+    }
+end
+
+local function removeESPFor(id)
+    local e = ESPRegistry[id]; if not e then return end
+    if e.esp and e.esp.Parent then e.esp:Destroy() end
+    if e.box and e.box.Parent then e.box:Destroy() end
+    ESPRegistry[id] = nil
+end
+
+local function enableESP()
+    if not IS_MAIN then Toast("Only in Main Game!") return end
+    ESP.enabled = true
+    if ZombieTable then
+        for id, data in pairs(ZombieTable) do
+            if data.IsDying or (data.Health or 1) <= 0 then continue end
+            if data.Model and data.Model.Parent then
+                pcall(function() createESPFor(id, data.Model, data.Humanoid) end)
+            end
+        end
+    end
+    local function scanFolder(folder)
+        if not folder then return end
+        for _, child in ipairs(folder:GetChildren()) do
+            local nid = tonumber(child.Name:match("^Zombie_(%d+)$"))
+            if nid and not ESPRegistry[nid] then
+                pcall(function()
+                    createESPFor(nid, child, child:FindFirstChildOfClass("Humanoid"))
+                end)
+            end
+        end
+    end
+    scanFolder(workspace:FindFirstChild("Zombies_Local"))
+    scanFolder(workspace:FindFirstChild("FriendlyZombies"))
+    Toast("Zombie ESP ENABLED")
+end
+
+local function disableESP()
+    ESP.enabled = false
+    for id, _ in pairs(ESPRegistry) do removeESPFor(id) end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj.Name == "_ESPBox" then pcall(function() obj:Destroy() end) end
+    end
+    Toast("Zombie ESP DISABLED")
+end
+
+RunService.Heartbeat:Connect(function()
+    if not ESP.enabled then return end
+    ESP.frameCount = ESP.frameCount + 1
+    if ESP.frameCount % ESP.UPDATE_EVERY ~= 0 then return end
+    local hrp = getHRP()
+    local myPos = hrp and hrp.Position or Vector3.zero
+    for id, e in pairs(ESPRegistry) do
+        if not (e.hrp and e.hrp.Parent) then removeESPFor(id) continue end
+        local data = ZombieTable and ZombieTable[id]
+        if data and (data.IsDying or (data.Health or 1) <= 0) then
+            removeESPFor(id) continue
+        end
+        if e.humanoid and e.humanoid.Health <= 0 then
+            removeESPFor(id) continue
+        end
+        local dist = math.floor((e.hrp.Position - myPos).Magnitude)
+        e.distLbl.Text = dist .. " studs"
+        e.distLbl.TextColor3 = dist < 20 and Color3.fromRGB(255,80,80)
+            or dist < 60 and Color3.fromRGB(255,200,60)
+            or Color3.fromRGB(120,220,120)
+        if data and data.MaxHealth and data.MaxHealth > 0 then
+            local ratio = math.clamp(data.Health / data.MaxHealth, 0, 1)
+            e.hpFill.Size = UDim2.new(ratio, 0, 1, 0)
+            e.hpFill.BackgroundColor3 = Color3.fromRGB(
+                math.floor(255*(1-ratio)), math.floor(255*ratio), 40)
+        end
+    end
+    if ZombieTable then
+        for id, data in pairs(ZombieTable) do
+            if not ESPRegistry[id] and not data.IsDying and (data.Health or 1) > 0 then
+                if data.Model and data.Model.Parent then
+                    pcall(function() createESPFor(id, data.Model, data.Humanoid) end)
+                end
+            end
+        end
+    end
+end)
+
+workspace.ChildAdded:Connect(function(child)
+    if not ESP.enabled then return end
+    if child.Name == "Zombies_Local" or child.Name == "FriendlyZombies" then
+        child.ChildAdded:Connect(function(zombie)
+            if not ESP.enabled then return end
+            local nid = tonumber(zombie.Name:match("^Zombie_(%d+)$"))
+            if nid then
+                task.wait(0.1)
+                pcall(function()
+                    createESPFor(nid, zombie, zombie:FindFirstChildOfClass("Humanoid"))
+                end)
+            end
+        end)
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- WAVE SKIP
+-- ═══════════════════════════════════════════════════════════
+local WaveSkip = { autoEnabled = false, skipCount = 0, thread = nil }
+local SKIP_REMOTE_NAMES = {
+    "SkipWave","VoteSkip","NextWave","SkipRound","VoteNextWave",
+    "SkipVote","WaveSkip","SkipWaveVote","RequestSkip","SkipRequest",
+    "WaveVote","Vote","Skip",
+}
+
+local function findSkipRemote()
+    for _, name in ipairs(SKIP_REMOTE_NAMES) do
+        local r = ReplicatedStorage:FindFirstChild(name, true)
+        if r and (r:IsA("RemoteEvent") or r:IsA("RemoteFunction")) then return r end
+    end
+    local er = ReplicatedStorage:FindFirstChild("EventRemotes")
+    if er then
+        for _, child in ipairs(er:GetChildren()) do
+            local n = child.Name:lower()
+            if n:find("skip") or n:find("wave") or n:find("next") or n:find("vote") then
+                return child
+            end
+        end
+    end
+    return nil
+end
+
+local function doSkipWave()
+    if not IS_ARENA then Toast("Only in Arena!") return end
+    local remote = findSkipRemote()
+    local fired = false
+    if remote then
+        if remote:IsA("RemoteEvent") then
+            pcall(function() remote:FireServer() end)
+            pcall(function() remote:FireServer(true) end)
+        elseif remote:IsA("RemoteFunction") then
+            pcall(function() remote:InvokeServer() end)
+        end
+        fired = true
+    end
+    for _, gui in ipairs(LP.PlayerGui:GetDescendants()) do
+        if gui:IsA("TextButton") or gui:IsA("ImageButton") then
+            local t = (gui.Name .. " " .. (gui:IsA("TextButton") and gui.Text or "")):lower()
+            if t:find("skip") or t:find("next.*wave") or t:find("wave.*skip") or t:find("vote") then
+                pcall(function() gui.MouseButton1Click:Fire() end)
+                pcall(function() gui.Activated:Fire() end)
+                fired = true
+            end
+        end
+    end
+    WaveSkip.skipCount = WaveSkip.skipCount + 1
+end
+
+local function startAutoWaveSkip()
+    if not IS_ARENA then Toast("Only in Arena!") return end
+    WaveSkip.autoEnabled = true
+    Toast("Auto Wave Skip ENABLED")
+    WaveSkip.thread = task.spawn(function()
+        while WaveSkip.autoEnabled do doSkipWave(); task.wait(0.05) end
+    end)
+end
+
+local function stopAutoWaveSkip()
+    WaveSkip.autoEnabled = false
+    WaveSkip.thread = nil
+    Toast("Auto Wave Skip DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- AUTO SHOP
+-- ═══════════════════════════════════════════════════════════
+local AutoShop = {
+    healthEnabled = false, weaponEnabled = false,
+    healthThread  = nil,   weaponThread  = nil,
+    healthCount   = 0,     weaponCount   = 0,
+}
+local HEALTH_REMOTE_NAMES = {
+    "PurchaseHealthUpgrade","BuyHealth","UpgradeHealth","HealthUpgrade","PurchaseHealth",
+    "BuyMaxHealth","UpgradeMaxHealth","Health","ShopBuyHealth",
+    "BuyItem","PurchaseItem","Shop","Upgrade","Buy",
+}
+local WEAPON_REMOTE_NAMES = {
+    "PurchaseWeaponUpgrade","PurchaseDamageUpgrade","BuyWeapon","UpgradeWeapon",
+    "WeaponUpgrade","PurchaseWeapon","BuyGun","UpgradeGun","Weapon","ShopBuyWeapon",
+    "BuyItem","PurchaseItem","Shop","Upgrade","Buy",
+}
+local function findRemotesByNames(names)
+    local found = {}
+    for _, name in ipairs(names) do
+        for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+            if obj.Name:lower() == name:lower() and
+               (obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")) then
+                table.insert(found, obj)
+            end
+        end
+    end
+    return found
+end
+local function fireShopRemote(remote, ...)
+    local args = {...}
+    if remote:IsA("RemoteEvent") then
+        pcall(function() remote:FireServer(table.unpack(args)) end)
+    elseif remote:IsA("RemoteFunction") then
+        pcall(function() remote:InvokeServer(table.unpack(args)) end)
+    end
+end
+local CachedHealthRemotes, CachedWeaponRemotes = nil, nil
+local function doHealthBuy()
+    if not CachedHealthRemotes then
+        CachedHealthRemotes = findRemotesByNames(HEALTH_REMOTE_NAMES)
+    end
+    local args = {
+        "Health","MaxHealth","UpgradeHealth","HealthUpgrade",
+        "BuyHealth",1,2,"Upgrade","Buy",true,"HP"
+    }
+    for _, rem in ipairs(CachedHealthRemotes) do
+        fireShopRemote(rem)
+        for _, arg in ipairs(args) do
+            fireShopRemote(rem, arg)
+            fireShopRemote(rem, arg, 1)
+        end
+    end
+end
+local function doWeaponBuy()
+    if not CachedWeaponRemotes then
+        CachedWeaponRemotes = findRemotesByNames(WEAPON_REMOTE_NAMES)
+    end
+    local args = {
+        "Weapon","Damage","UpgradeWeapon","WeaponUpgrade",
+        "BuyWeapon","Gun",1,2,"Upgrade","Buy",true
+    }
+    for _, rem in ipairs(CachedWeaponRemotes) do
+        fireShopRemote(rem)
+        for _, arg in ipairs(args) do
+            fireShopRemote(rem, arg)
+            fireShopRemote(rem, arg, 1)
+        end
+    end
+end
+local function startAutoHealth()
+    if not IS_ARENA then Toast("Only in Arena!") return end
+    AutoShop.healthEnabled = true
+    Toast("Auto Health ENABLED")
+    AutoShop.healthThread = task.spawn(function()
+        while AutoShop.healthEnabled do
+            doHealthBuy()
+            AutoShop.healthCount = AutoShop.healthCount + 1
+            task.wait(1.5)
+        end
+    end)
+end
+local function stopAutoHealth()
+    AutoShop.healthEnabled = false
+    AutoShop.healthThread  = nil
+    Toast("Auto Health DISABLED")
+end
+local function startAutoWeapon()
+    if not IS_ARENA then Toast("Only in Arena!") return end
+    AutoShop.weaponEnabled = true
+    Toast("Auto Weapon ENABLED")
+    AutoShop.weaponThread = task.spawn(function()
+        while AutoShop.weaponEnabled do
+            doWeaponBuy()
+            AutoShop.weaponCount = AutoShop.weaponCount + 1
+            task.wait(1.5)
+        end
+    end)
+end
+local function stopAutoWeapon()
+    AutoShop.weaponEnabled = false
+    AutoShop.weaponThread  = nil
+    Toast("Auto Weapon DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- ANTI-AFK (Arena)
+-- ═══════════════════════════════════════════════════════════
+local AntiAFK_Arena = { enabled = false, thread = nil }
+
+table.insert(GlobalConnections, LP.Idled:Connect(function()
+    if AntiAFK_Arena.enabled then
+        pcall(function()
+            VirtualUser:CaptureController()
+            VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        end)
+        task.wait(0.1)
+        pcall(function()
+            VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        end)
+    end
+end))
+
+local function antiAfkEnable()
+    if not IS_ARENA then Toast("Only in Arena!") return end
+    AntiAFK_Arena.enabled = true
+    Toast("Anti-AFK ENABLED")
+    AntiAFK_Arena.thread = task.spawn(function()
+        while AntiAFK_Arena.enabled do
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            end)
+            task.wait(0.05)
+            pcall(function()
+                VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            end)
+            task.wait(20)
+        end
+    end)
+end
+local function antiAfkDisable()
+    AntiAFK_Arena.enabled = false
+    AntiAFK_Arena.thread  = nil
+    Toast("Anti-AFK DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- AUTO GEAR
+-- ═══════════════════════════════════════════════════════════
+local AutoGear = { enabled = false, thread = nil, delay = 0.05 }
+
+local function autoGearEnable()
+    AutoGear.enabled = true
+    Toast("Auto Gear ENABLED")
+    AutoGear.thread = task.spawn(function()
+        while AutoGear.enabled do
+            local char = LP.Character
+            if char then
+                local tool = char:FindFirstChildOfClass("Tool")
+                if tool then pcall(function() tool:Activate() end) end
+            end
+            task.wait(AutoGear.delay)
+        end
+    end)
+end
+local function autoGearDisable()
+    AutoGear.enabled = false
+    AutoGear.thread  = nil
+    Toast("Auto Gear DISABLED")
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- BUILD N0BD.HUB TABS
+-- ═══════════════════════════════════════════════════════════
+
+-- ─────────────────────────────────────────────────────────
+-- TAB 1: ZOMBIES
+-- ─────────────────────────────────────────────────────────
+do
+    local zombiePage = UI.AddTab("Zombies")
+
+    UI.AddHeader(zombiePage, "Kill Engine", "KillHeader")
+
+    local ztLabel      = UI.AddLabel(zombiePage, "ZombieTable", "Scanning...", "ZombieTableStatus")
+    local killCountLbl = UI.AddLabel(zombiePage, "Total Kills", "0 killed", "KillCount")
+    Kill.countLabel = killCountLbl
+
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            if not UI.Gui.Parent then break end
+            if ZombieTable then
+                local n = 0
+                for _ in pairs(ZombieTable) do n = n + 1 end
+                ztLabel.SetValue("OK | " .. n .. " alive")
+            else
+                ztLabel.SetValue("Scanning...")
+            end
+            local ok, kills = pcall(function() return LP.leaderstats.Kills.Value end)
+            if ok and kills then killCountLbl.SetValue(kills .. " kills") end
+        end
+    end)
+
+    UI.AddDivider(zombiePage, "KillDiv1")
+
+    local _, killOnceBtn = UI.AddButton(
+        zombiePage,
+        "Kill All Now",
+        "Fires damage remote at every alive zombie once",
+        "KILL ALL",
+        "KillOnceBtn"
+    )
+    killOnceBtn.MouseButton1Click:Connect(function()
+        task.spawn(killOnce)
+    end)
+
+    UI.AddToggle(
+        zombiePage,
+        "Auto-Kill Loop",
+        "Kills all zombies automatically every 0.2s",
+        false,
+        function(on) if on then startAutoKill() else stopAutoKill() end end,
+        "AutoKillToggle"
+    )
+
+    UI.AddDivider(zombiePage, "ESPDiv0")
+    UI.AddHeader(zombiePage, "Zombie ESP", "ESPHeader")
+
+    UI.AddToggle(
+        zombiePage,
+        "Zombie ESP",
+        "Billboard + box through walls, HP bar + distance",
+        false,
+        function(on) if on then enableESP() else disableESP() end end,
+        "ZombieESPToggle"
+    )
+
+    registerConfigToggle("AutoKillToggle",
+        function() return Kill.autoEnabled end,
+        function(v)
+            local t = UI.GetToggle("AutoKillToggle")
+            if t then t.SetSilent(v) end
+            if v then startAutoKill() else stopAutoKill() end
+        end
+    )
+    registerConfigToggle("ZombieESPToggle",
+        function() return ESP.enabled end,
+        function(v)
+            local t = UI.GetToggle("ZombieESPToggle")
+            if t then t.SetSilent(v) end
+            if v then enableESP() else disableESP() end
+        end
+    )
+end
+
+-- ─────────────────────────────────────────────────────────
+-- TAB 2: MOVEMENT
+-- ─────────────────────────────────────────────────────────
+do
+    local movePage = UI.AddTab("Movement")
+
+    UI.AddHeader(movePage, "Fly", "FlyHeader")
+
+    UI.AddToggle(
+        movePage,
+        "Fly Mode",
+        "WASD + E/Space up + Q down + Shift boost",
+        false,
+        function(on) if on then flyEnable() else flyDisable() end end,
+        "FlyToggle"
+    )
+
+    UI.AddSlider(
+        movePage,
+        "Fly Speed",
+        "Speed while flying (studs/s)",
+        5, 300, 60,
+        function(v) Fly.speed = v end,
+        "FlySpeed"
+    )
+
+    UI.AddDivider(movePage, "MovDiv1")
+    UI.AddHeader(movePage, "Walk Speed", "SpdHeader")
+
+    UI.AddToggle(
+        movePage,
+        "Speed Hack",
+        "Locks WalkSpeed to custom value every frame",
+        false,
+        function(on) if on then speedEnable() else speedDisable() end end,
+        "SpeedHackToggle"
+    )
+
+    UI.AddSlider(
+        movePage,
+        "Walk Speed",
+        "WalkSpeed value (default: 16)",
+        16, 400, 100,
+        function(v)
+            SpeedHack.speed = v
+            if SpeedHack.enabled then
+                local hum = getHum()
+                if hum then hum.WalkSpeed = v end
+            end
+        end,
+        "WalkSpeedSlider"
+    )
+
+    UI.AddDivider(movePage, "MovDiv2")
+    UI.AddHeader(movePage, "Other Movement", "OtherMovHeader")
+
+    UI.AddToggle(
+        movePage,
+        "Noclip",
+        "Walk through any wall or floor",
+        false,
+        function(on) if on then noclipEnable() else noclipDisable() end end,
+        "NoclipToggle"
+    )
+
+    UI.AddToggle(
+        movePage,
+        "Infinite Jump",
+        "Jump anywhere, even mid-air",
+        false,
+        function(on) if on then infJumpEnable() else infJumpDisable() end end,
+        "InfJumpToggle"
+    )
+
+    UI.AddToggle(
+        movePage,
+        "Safe Zone Float",
+        "Floats +25 studs above current position",
+        false,
+        function(on) if on then safezoneEnable() else safezoneDisable() end end,
+        "SafeZoneToggle"
+    )
+
+    registerConfigToggle("FlyToggle",
+        function() return Fly.enabled end,
+        function(v)
+            local t = UI.GetToggle("FlyToggle"); if t then t.SetSilent(v) end
+            if v then flyEnable() else flyDisable() end
+        end)
+    registerConfigSlider("FlySpeed",
+        function() return Fly.speed end,
+        function(v)
+            Fly.speed = v
+            local s = UI.GetSlider("FlySpeed"); if s then s.Set(v) end
+        end)
+    registerConfigToggle("SpeedHackToggle",
+        function() return SpeedHack.enabled end,
+        function(v)
+            local t = UI.GetToggle("SpeedHackToggle"); if t then t.SetSilent(v) end
+            if v then speedEnable() else speedDisable() end
+        end)
+    registerConfigSlider("WalkSpeedSlider",
+        function() return SpeedHack.speed end,
+        function(v)
+            SpeedHack.speed = v
+            local s = UI.GetSlider("WalkSpeedSlider"); if s then s.Set(v) end
+            if SpeedHack.enabled then
+                local hum = getHum(); if hum then hum.WalkSpeed = v end
+            end
+        end)
+    registerConfigToggle("NoclipToggle",
+        function() return Noclip.enabled end,
+        function(v)
+            local t = UI.GetToggle("NoclipToggle"); if t then t.SetSilent(v) end
+            if v then noclipEnable() else noclipDisable() end
+        end)
+    registerConfigToggle("InfJumpToggle",
+        function() return InfJump.enabled end,
+        function(v)
+            local t = UI.GetToggle("InfJumpToggle"); if t then t.SetSilent(v) end
+            if v then infJumpEnable() else infJumpDisable() end
+        end)
+    registerConfigToggle("SafeZoneToggle",
+        function() return SafeZone.enabled end,
+        function(v)
+            local t = UI.GetToggle("SafeZoneToggle"); if t then t.SetSilent(v) end
+            if v then safezoneEnable() else safezoneDisable() end
+        end)
+end
+
+-- ─────────────────────────────────────────────────────────
+-- TAB 3: PLAYER
+-- ─────────────────────────────────────────────────────────
+do
+    local playerPage = UI.AddTab("Player")
+
+    UI.AddHeader(playerPage, "Combat", "CombatHeader")
+
+    UI.AddToggle(
+        playerPage,
+        "God Mode",
+        "Locks HP to max, disables death state",
+        false,
+        function(on) if on then godEnable() else godDisable() end end,
+        "GodModeToggle"
+    )
+
+    UI.AddToggle(
+        playerPage,
+        "Auto Use Gear",
+        "Activates your equipped tool every 0.05s",
+        false,
+        function(on) if on then autoGearEnable() else autoGearDisable() end end,
+        "AutoGearToggle"
+    )
+
+    UI.AddDivider(playerPage, "PlayerDiv1")
+    UI.AddHeader(playerPage, "Performance", "PerfHeader")
+
+    UI.AddToggle(
+        playerPage,
+        "Anti-Lag Mode",
+        "Removes shadows, particles & fog for max FPS",
+        false,
+        function(on) if on then antiLagEnable() else antiLagDisable() end end,
+        "AntiLagToggle"
+    )
+
+    registerConfigToggle("GodModeToggle",
+        function() return GodMode.enabled end,
+        function(v)
+            local t = UI.GetToggle("GodModeToggle"); if t then t.SetSilent(v) end
+            if v then godEnable() else godDisable() end
+        end)
+    registerConfigToggle("AutoGearToggle",
+        function() return AutoGear.enabled end,
+        function(v)
+            local t = UI.GetToggle("AutoGearToggle"); if t then t.SetSilent(v) end
+            if v then autoGearEnable() else autoGearDisable() end
+        end)
+    registerConfigToggle("AntiLagToggle",
+        function() return AntiLag.enabled end,
+        function(v)
+            local t = UI.GetToggle("AntiLagToggle"); if t then t.SetSilent(v) end
+            if v then antiLagEnable() else antiLagDisable() end
+        end)
+end
+
+-- ─────────────────────────────────────────────────────────
+-- TAB 4: ARENA
+-- ─────────────────────────────────────────────────────────
+do
+    local arenaPage = UI.AddTab("Arena")
+
+    UI.AddHeader(arenaPage, "Wave Control", "WaveHeader")
+
+    if not IS_ARENA then
+        UI.AddLabel(arenaPage, "Notice", "Arena Place only!", "ArenaNotice")
+    end
+
+    local _, waveSkipBtn = UI.AddButton(
+        arenaPage,
+        "Wave Skip",
+        "Fires skip/vote remote immediately",
+        "SKIP WAVE",
+        "WaveSkipBtn"
+    )
+    waveSkipBtn.MouseButton1Click:Connect(function() task.spawn(doSkipWave) end)
+
+    UI.AddToggle(
+        arenaPage,
+        "Auto Wave Skip",
+        "Continuously fires wave skip (fast loop)",
+        false,
+        function(on) if on then startAutoWaveSkip() else stopAutoWaveSkip() end end,
+        "AutoWaveSkipToggle"
+    )
+
+    UI.AddDivider(arenaPage, "ArenaDiv1")
+    UI.AddHeader(arenaPage, "Auto Shop", "ShopHeader")
+
+    UI.AddToggle(
+        arenaPage,
+        "Auto Health Upgrade",
+        "Fires health upgrade remote every 1.5s",
+        false,
+        function(on) if on then startAutoHealth() else stopAutoHealth() end end,
+        "AutoHealthToggle"
+    )
+
+    UI.AddToggle(
+        arenaPage,
+        "Auto Weapon Upgrade",
+        "Fires weapon upgrade remote every 1.5s",
+        false,
+        function(on) if on then startAutoWeapon() else stopAutoWeapon() end end,
+        "AutoWeaponToggle"
+    )
+
+    local healthCountLbl = UI.AddLabel(arenaPage, "Health Buys", "0 applied", "HealthBuyCount")
+    local weaponCountLbl = UI.AddLabel(arenaPage, "Weapon Buys", "0 applied", "WeaponBuyCount")
+
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            if not UI.Gui.Parent then break end
+            healthCountLbl.SetValue(AutoShop.healthCount .. " applied")
+            weaponCountLbl.SetValue(AutoShop.weaponCount .. " applied")
+        end
+    end)
+
+    UI.AddDivider(arenaPage, "ArenaDiv2")
+    UI.AddHeader(arenaPage, "Anti-AFK", "AfkHeader")
+
+    UI.AddToggle(
+        arenaPage,
+        "Anti-AFK",
+        "Simulates input every 20s to prevent idle kick",
+        false,
+        function(on) if on then antiAfkEnable() else antiAfkDisable() end end,
+        "ArenaAntiAfkToggle"
+    )
+
+    registerConfigToggle("AutoWaveSkipToggle",
+        function() return WaveSkip.autoEnabled end,
+        function(v)
+            local t = UI.GetToggle("AutoWaveSkipToggle"); if t then t.SetSilent(v) end
+            if v then startAutoWaveSkip() else stopAutoWaveSkip() end
+        end)
+    registerConfigToggle("AutoHealthToggle",
+        function() return AutoShop.healthEnabled end,
+        function(v)
+            local t = UI.GetToggle("AutoHealthToggle"); if t then t.SetSilent(v) end
+            if v then startAutoHealth() else stopAutoHealth() end
+        end)
+    registerConfigToggle("AutoWeaponToggle",
+        function() return AutoShop.weaponEnabled end,
+        function(v)
+            local t = UI.GetToggle("AutoWeaponToggle"); if t then t.SetSilent(v) end
+            if v then startAutoWeapon() else stopAutoWeapon() end
+        end)
+    registerConfigToggle("ArenaAntiAfkToggle",
+        function() return AntiAFK_Arena.enabled end,
+        function(v)
+            local t = UI.GetToggle("ArenaAntiAfkToggle"); if t then t.SetSilent(v) end
+            if v then antiAfkEnable() else antiAfkDisable() end
+        end)
+end
+
+-- ─────────────────────────────────────────────────────────
+-- TAB 5: MAIN GAME
+-- ─────────────────────────────────────────────────────────
+do
+    local mainPage = UI.AddTab("Main Game")
+
+    UI.AddHeader(mainPage, "Galactic Spin", "SpinHeader")
+
+    if not IS_MAIN then
+        UI.AddLabel(mainPage, "Notice", "Main Game Place only!", "MainNotice")
+    end
+
+    local spinCountLbl = UI.AddLabel(mainPage, "Spin Count", "0 spins", "GalacticSpinCount")
+    GalacticSpin.countLabel = spinCountLbl
+
+    local _, spinOnceBtn = UI.AddButton(
+        mainPage,
+        "Galactic Spin",
+        "Fires GalacticRequestSpin remote once",
+        "SPIN ONCE",
+        "GalacticSpinBtn"
+    )
+    spinOnceBtn.MouseButton1Click:Connect(function() task.spawn(doSpin) end)
+
+    UI.AddToggle(
+        mainPage,
+        "Auto Galactic Spin",
+        "Automatically spins every 3 seconds",
+        false,
+        function(on) if on then startAutoSpin() else stopAutoSpin() end end,
+        "AutoGalacticSpinToggle"
+    )
+
+    UI.AddDivider(mainPage, "MainDiv1")
+    UI.AddHeader(mainPage, "VoidShard Magnet", "VoidHeader")
+
+    local voidCountLbl = UI.AddLabel(mainPage, "Shards Collected", "0 collected", "VoidShardCount")
+    VoidMagnet.countLabel = voidCountLbl
+
+    local _, collectNowBtn = UI.AddButton(
+        mainPage,
+        "VoidShard Magnet",
+        "Teleports all visible shards to player",
+        "COLLECT NOW",
+        "VoidCollectBtn"
+    )
+    collectNowBtn.MouseButton1Click:Connect(function()
+        if not IS_MAIN then Toast("Only in Main Game!") return end
+        local vf = workspace:FindFirstChild("VoidShards")
+        if vf then
+            for _, child in ipairs(vf:GetChildren()) do
+                VoidMagnet_seen[child] = nil
+                task.spawn(function() tryCollectShard(child) end)
+            end
+            Toast("Collecting all visible shards...")
+        else
+            Toast("No VoidShards folder found!")
+        end
+    end)
+
+    UI.AddToggle(
+        mainPage,
+        "Auto VoidShard Magnet",
+        "Auto-collects shards as they spawn",
+        false,
+        function(on) if on then enableVoidMagnet() else disableVoidMagnet() end end,
+        "VoidMagnetToggle"
+    )
+
+    registerConfigToggle("AutoGalacticSpinToggle",
+        function() return GalacticSpin.autoEnabled end,
+        function(v)
+            local t = UI.GetToggle("AutoGalacticSpinToggle"); if t then t.SetSilent(v) end
+            if v then startAutoSpin() else stopAutoSpin() end
+        end)
+    registerConfigToggle("VoidMagnetToggle",
+        function() return VoidMagnet.enabled end,
+        function(v)
+            local t = UI.GetToggle("VoidMagnetToggle"); if t then t.SetSilent(v) end
+            if v then enableVoidMagnet() else disableVoidMagnet() end
+        end)
+end
+
+-- ─────────────────────────────────────────────────────────
+-- TAB 6: CONFIG
+-- ─────────────────────────────────────────────────────────
+do
+    local cfgPage = UI.AddTab("Config")
+
+    UI.AddHeader(cfgPage, "Save & Load", "CfgSaveHeader")
+
+    local _, saveBtn = UI.AddButton(
+        cfgPage,
+        "Save Config",
+        "Saves all toggle & slider states to file",
+        "SAVE",
+        "CfgSaveBtn"
+    )
+    saveBtn.MouseButton1Click:Connect(function() saveConfig() end)
+
+    local _, loadBtn = UI.AddButton(
+        cfgPage,
+        "Load Config",
+        "Loads config from file and applies all settings",
+        "LOAD",
+        "CfgLoadBtn"
+    )
+    loadBtn.MouseButton1Click:Connect(function() loadConfig(false) end)
+
+    local _, resetBtn = UI.AddButton(
+        cfgPage,
+        "Reset Config",
+        "Deletes the saved config file from disk",
+        "RESET",
+        "CfgResetBtn"
+    )
+    resetBtn.MouseButton1Click:Connect(function()
+        if delfile then
+            pcall(function() delfile(CONFIG_FILE) end)
+            Toast("Config file deleted!")
+            local fl = UI.GetLabel("CfgFileStatus")
+            if fl then fl.SetValue("No file found") end
+        else
+            Toast("delfile not available!")
+        end
+    end)
+
+    UI.AddDivider(cfgPage, "CfgDiv1")
+    UI.AddHeader(cfgPage, "Auto-Load", "CfgAutoHeader")
+
+    UI.AddToggle(
+        cfgPage,
+        "Auto-Load on Start",
+        "Automatically loads config when script runs",
+        false,
+        function(on)
+            if on then Toast("Auto-Load enabled") else Toast("Auto-Load disabled") end
+        end,
+        "CfgAutoLoadToggle"
+    )
+
+    registerConfigToggle("CfgAutoLoadToggle",
+        function()
+            local t = UI.GetToggle("CfgAutoLoadToggle")
+            return t and t.Get() or false
+        end,
+        function(v)
+            local t = UI.GetToggle("CfgAutoLoadToggle")
+            if t then t.SetSilent(v) end
+        end
+    )
+
+    UI.AddDivider(cfgPage, "CfgDiv2")
+    UI.AddHeader(cfgPage, "Status", "CfgStatusHeader")
+
+    local fileStatusLbl = UI.AddLabel(cfgPage, "Config File", "Checking...", "CfgFileStatus")
+    local savedKeysLbl  = UI.AddLabel(cfgPage, "Tracked Keys", "0 entries", "CfgKeysCount")
+    local folderLbl     = UI.AddLabel(cfgPage, "Folder", CONFIG_FOLDER, "CfgFolderLbl")
+
+    task.spawn(function()
+        task.wait(0.5)
+        local n = 0; for _ in pairs(ConfigRegistry) do n = n + 1 end
+        savedKeysLbl.SetValue(tostring(n) .. " entries")
+        if isfile and isfile(CONFIG_FILE) then
+            fileStatusLbl.SetValue("Found: " .. CONFIG_NAME)
+        else
+            fileStatusLbl.SetValue("No file found")
+        end
+    end)
+
+    UI.AddDivider(cfgPage, "CfgDiv3")
+    UI.AddHeader(cfgPage, "Cleanup", "CleanupHeader")
+
+    local _, cleanupBtn = UI.AddButton(
+        cfgPage,
+        "Cleanup All",
+        "Disables all features and destroys the GUI",
+        "CLEANUP",
+        "CleanupBtn"
+    )
+    cleanupBtn.MouseButton1Click:Connect(function()
+        pcall(flyDisable); pcall(safezoneDisable); pcall(noclipDisable)
+        pcall(godDisable); pcall(infJumpDisable); pcall(speedDisable)
+        pcall(antiLagDisable); pcall(stopAutoKill); pcall(disableESP)
+        pcall(disableVoidMagnet); pcall(stopAutoSpin)
+        pcall(stopAutoHealth); pcall(stopAutoWeapon)
+        pcall(stopAutoWaveSkip); pcall(antiAfkDisable); pcall(autoGearDisable)
+        for _, conn in ipairs(GlobalConnections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        table.clear(GlobalConnections)
+        if getgenv().N0BD_Cleanup then pcall(getgenv().N0BD_Cleanup) end
+    end)
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- HOTKEYS
+-- ═══════════════════════════════════════════════════════════
+table.insert(GlobalConnections, UserInputService.InputBegan:Connect(function(i, proc)
+    if proc then return end
+    if i.KeyCode == Enum.KeyCode.F9 then task.spawn(killOnce) end
+    if i.KeyCode == Enum.KeyCode.F8 then
+        local t = UI.GetToggle("ZombieESPToggle"); if t then t.Toggle() end
+    end
+    if i.KeyCode == Enum.KeyCode.F7 then
+        local t = UI.GetToggle("VoidMagnetToggle"); if t then t.Toggle() end
+    end
+end))
+
+-- ═══════════════════════════════════════════════════════════
+-- CHARACTER ADDED
+-- ═══════════════════════════════════════════════════════════
+table.insert(GlobalConnections, LP.CharacterAdded:Connect(function(char)
+    char:WaitForChild("HumanoidRootPart"); task.wait(0.5)
+    if Fly.enabled then
+        flyDisable()
+        local t = UI.GetToggle("FlyToggle"); if t then t.SetSilent(false) end
+    end
+    if Noclip.enabled then
+        noclipDisable()
+        local t = UI.GetToggle("NoclipToggle"); if t then t.SetSilent(false) end
+    end
+    if Kill.autoEnabled then
+        stopAutoKill()
+        local t = UI.GetToggle("AutoKillToggle"); if t then t.SetSilent(false) end
+    end
+    if SafeZone.enabled then
+        task.wait(0.3)
+        local bp = Instance.new("BodyPosition")
+        bp.Name = "SafeZoneBP"; bp.MaxForce = Vector3.new(0, math.huge, 0)
+        bp.Position = Vector3.new(0, SafeZone.lockedY, 0)
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if root then bp.Parent = root end
+    end
+    if GodMode.enabled then
+        if GodMode.conn then GodMode.conn:Disconnect() end
+        GodMode.enabled = false; godEnable()
+    end
+    if InfJump.enabled then
+        if InfJump.conn then InfJump.conn:Disconnect() end
+        InfJump.enabled = false; infJumpEnable()
+    end
+    if SpeedHack.enabled then task.wait(0.2); speedEnable() end
+end))
+
+-- ═══════════════════════════════════════════════════════════
+-- SELECT FIRST TAB & RENAME WITH EMOJIS
+-- Emojis werden auf die Tab-Buttons angewendet NACH dem
+-- createTab()-Aufruf, da AddTab() den internen Namen als ID
+-- benutzt. Wir holen die Button-Instanzen ueber GetTab().
+-- ═══════════════════════════════════════════════════════════
+UI.SelectTab("Zombies")
+
+task.defer(function()
+    local tabEmojis = {
+        ["Zombies"]   = "🧟 Zombies",
+        ["Movement"]  = "🏃 Movement",
+        ["Player"]    = "👤 Player",
+        ["Arena"]     = "🏟️ Arena",
+        ["Main Game"] = "🎮 Main Game",
+        ["Config"]    = "⚙️ Config",
+    }
+
+    for name, text in pairs(tabEmojis) do
+        local entry = UI.GetTab(name)
+        if entry and entry.Button then
+            entry.Button.Text = text
+        end
+    end
+
+    -- ── ZOMBIES TAB ──────────────────────────────────────
+    local zombiesTab = UI.GetTab("Zombies")
+    if zombiesTab and zombiesTab.Button then
+        zombiesTab.Button.Text = " Zombies"
+    end
+    local killHeader = UI.GetHeader("KillHeader")
+    if killHeader and killHeader.Label then
+        killHeader.Label.Text = " Kill Engine"
+    end
+    local espHeader = UI.GetHeader("ESPHeader")
+    if espHeader and espHeader.Label then
+        espHeader.Label.Text = " Zombie ESP"
+    end
+
+    -- ── MOVEMENT TAB ─────────────────────────────────────
+    local movTab = UI.GetTab("Movement")
+    if movTab and movTab.Button then
+        movTab.Button.Text = " Movement"
+    end
+    local flyHeader = UI.GetHeader("FlyHeader")
+    if flyHeader and flyHeader.Label then
+        flyHeader.Label.Text = " Fly"
+    end
+    local spdHeader = UI.GetHeader("SpdHeader")
+    if spdHeader and spdHeader.Label then
+        spdHeader.Label.Text = " Walk Speed"
+    end
+    local otherMovHeader = UI.GetHeader("OtherMovHeader")
+    if otherMovHeader and otherMovHeader.Label then
+        otherMovHeader.Label.Text = " Other Movement"
+    end
+
+    -- ── PLAYER TAB ───────────────────────────────────────
+    local playerTab = UI.GetTab("Player")
+    if playerTab and playerTab.Button then
+        playerTab.Button.Text = " Player"
+    end
+    local combatHeader = UI.GetHeader("CombatHeader")
+    if combatHeader and combatHeader.Label then
+        combatHeader.Label.Text = " Combat"
+    end
+    local perfHeader = UI.GetHeader("PerfHeader")
+    if perfHeader and perfHeader.Label then
+        perfHeader.Label.Text = " Performance"
+    end
+
+    -- ── ARENA TAB ────────────────────────────────────────
+    local arenaTab = UI.GetTab("Arena")
+    if arenaTab and arenaTab.Button then
+        arenaTab.Button.Text = " Arena"
+    end
+    local waveHeader = UI.GetHeader("WaveHeader")
+    if waveHeader and waveHeader.Label then
+        waveHeader.Label.Text = " Wave Control"
+    end
+    local shopHeader = UI.GetHeader("ShopHeader")
+    if shopHeader and shopHeader.Label then
+        shopHeader.Label.Text = " Auto Shop"
+    end
+    local afkHeader = UI.GetHeader("AfkHeader")
+    if afkHeader and afkHeader.Label then
+        afkHeader.Label.Text = " Anti-AFK"
+    end
+
+    -- ── MAIN GAME TAB ────────────────────────────────────
+    local mainTab = UI.GetTab("Main Game")
+    if mainTab and mainTab.Button then
+        mainTab.Button.Text = " Main Game"
+    end
+    local spinHeader = UI.GetHeader("SpinHeader")
+    if spinHeader and spinHeader.Label then
+        spinHeader.Label.Text = " Galactic Spin"
+    end
+    local voidHeader = UI.GetHeader("VoidHeader")
+    if voidHeader and voidHeader.Label then
+        voidHeader.Label.Text = " VoidShard Magnet"
+    end
+
+    -- ── CONFIG TAB ───────────────────────────────────────
+    local cfgTab = UI.GetTab("Config")
+    if cfgTab and cfgTab.Button then
+        cfgTab.Button.Text = " Config"
+    end
+    local cfgSaveHeader = UI.GetHeader("CfgSaveHeader")
+    if cfgSaveHeader and cfgSaveHeader.Label then
+        cfgSaveHeader.Label.Text = " Save & Load"
+    end
+    local cfgAutoHeader = UI.GetHeader("CfgAutoHeader")
+    if cfgAutoHeader and cfgAutoHeader.Label then
+        cfgAutoHeader.Label.Text = " Auto-Load"
+    end
+    local cfgStatusHeader = UI.GetHeader("CfgStatusHeader")
+    if cfgStatusHeader and cfgStatusHeader.Label then
+        cfgStatusHeader.Label.Text = " Status"
+    end
+    local cleanupHeader = UI.GetHeader("CleanupHeader")
+    if cleanupHeader and cleanupHeader.Label then
+        cleanupHeader.Label.Text = " Cleanup"
+    end
+
+    -- ── TOGGLE LABELS (via Components.Toggles) ───────────
+    local toggleEmojis = {
+        AutoKillToggle         = " Auto-Kill Loop",
+        ZombieESPToggle        = " Zombie ESP",
+        FlyToggle              = " Fly Mode",
+        SpeedHackToggle        = " Speed Hack",
+        NoclipToggle           = " Noclip",
+        InfJumpToggle          = " Infinite Jump",
+        SafeZoneToggle         = " Safe Zone Float",
+        GodModeToggle          = " God Mode",
+        AutoGearToggle         = " Auto Use Gear",
+        AntiLagToggle          = " Anti-Lag Mode",
+        AutoWaveSkipToggle     = " Auto Wave Skip",
+        AutoHealthToggle       = " Auto Health Upgrade",
+        AutoWeaponToggle       = " Auto Weapon Upgrade",
+        ArenaAntiAfkToggle     = " Anti-AFK",
+        AutoGalacticSpinToggle = " Auto Galactic Spin",
+        VoidMagnetToggle       = " Auto VoidShard Magnet",
+        CfgAutoLoadToggle      = " Auto-Load on Start",
+    }
+    for id, label in pairs(toggleEmojis) do
+        local comp = UI.GetToggle(id)
+        if comp and comp.Title then
+            comp.Title.Text = label
+        end
+    end
+
+    -- ── SLIDER LABELS ────────────────────────────────────
+    local sliderEmojis = {
+        FlySpeed        = " Fly Speed",
+        WalkSpeedSlider = " Walk Speed",
+    }
+    for id, label in pairs(sliderEmojis) do
+        local comp = UI.GetSlider(id)
+        if comp and comp.Title then
+            comp.Title.Text = label
+        end
+    end
+
+    -- ── BUTTON (ACTION CARD) TITLES ──────────────────────
+    local buttonEmojis = {
+        KillOnceBtn            = " Kill All Now",
+        WaveSkipBtn            = " Wave Skip",
+        GalacticSpinBtn        = " Galactic Spin",
+        VoidCollectBtn         = " VoidShard Magnet",
+        CfgSaveBtn             = " Save Config",
+        CfgLoadBtn             = " Load Config",
+        CfgResetBtn            = " Reset Config",
+        CleanupBtn             = " Cleanup All",
+    }
+    for id, titleText in pairs(buttonEmojis) do
+        local comp = UI.GetButton(id)
+        if comp and comp.Title then
+            comp.Title.Text = titleText
+        end
+    end
+
+    -- ── LABEL TITLES ─────────────────────────────────────
+    local labelEmojis = {
+        ZombieTableStatus  = " ZombieTable",
+        KillCount          = " Total Kills",
+        GalacticSpinCount  = " Spin Count",
+        VoidShardCount     = " Shards Collected",
+        HealthBuyCount     = " Health Buys",
+        WeaponBuyCount     = " Weapon Buys",
+        CfgFileStatus      = " Config File",
+        CfgKeysCount       = " Tracked Keys",
+        CfgFolderLbl       = " Folder",
+    }
+    for id, titleText in pairs(labelEmojis) do
+        local comp = UI.GetLabel(id)
+        if comp and comp.Title then
+            comp.Title.Text = titleText
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- AUTO-LOAD CONFIG ON START
+-- ═══════════════════════════════════════════════════════════
+task.defer(function()
+    task.wait(0.5)
+    local shouldAutoLoad = false
+    if readfile and isfile and HttpService then
+        pcall(function()
+            if isfile(CONFIG_FILE) then
+                local data = HttpService:JSONDecode(readfile(CONFIG_FILE))
+                if type(data) == "table" and data["CfgAutoLoadToggle"] == true then
+                    shouldAutoLoad = true
+                end
+            end
+        end)
+    end
+    if shouldAutoLoad then
+        task.wait(0.3)
+        loadConfig(false)
+        Toast("Config auto-loaded!")
+    end
+    task.wait(0.5)
+    local fl = UI.GetLabel("CfgFileStatus")
+    if fl then
+        if isfile and isfile(CONFIG_FILE) then
+            fl.SetValue("Found: " .. CONFIG_NAME)
+        else
+            fl.SetValue("No file found")
+        end
+    end
+    local kl = UI.GetLabel("CfgKeysCount")
+    if kl then
+        local n = 0; for _ in pairs(ConfigRegistry) do n = n + 1 end
+        kl.SetValue(tostring(n) .. " entries")
+    end
+end)
+
+Toast("N0BD.HUB x Survival Zombie loaded!")
